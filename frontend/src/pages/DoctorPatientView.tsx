@@ -10,6 +10,7 @@ interface Record {
   created_at: string;
   patient_id: number;
   blockchain_tx_hash: string | null;
+  ipfs_cid?: string;
 }
 
 export default function DoctorPatientView() {
@@ -18,6 +19,7 @@ export default function DoctorPatientView() {
   const [patientInfo, setPatientInfo] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [downloadingRecordId, setDownloadingRecordId] = useState<number | null>(null);
+  const [integrityResults, setIntegrityResults] = useState<{ [key: number]: boolean | null }>({});
 
   useEffect(() => {
     const fetchData = async () => {
@@ -59,6 +61,9 @@ export default function DoctorPatientView() {
         const errorData = await response.json().catch(() => ({}));
         throw new Error(errorData.detail || 'Download failed');
       }
+
+      const integrityVerified = response.headers.get('X-Integrity-Verified') === 'true';
+      setIntegrityResults(prev => ({ ...prev, [recordId]: integrityVerified }));
       
       let filename = `record_${recordId}.enc`;
       const disposition = response.headers.get('Content-Disposition');
@@ -156,15 +161,27 @@ export default function DoctorPatientView() {
                     </div>
                   </td>
                   <td className="py-4 px-6">
-                    {record.blockchain_tx_hash ? (
-                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                        <CheckCircle2 className="w-3.5 h-3.5" /> Verified
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200">
-                        <Loader2 className="w-3.5 h-3.5 animate-spin" /> Pending
-                      </span>
-                    )}
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {record.blockchain_tx_hash ? (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                          <CheckCircle2 className="w-3.5 h-3.5" /> Verified
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200">
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" /> Pending
+                        </span>
+                      )}
+                      {record.ipfs_cid && (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-bold bg-purple-50 text-purple-700 border border-purple-200">
+                          IPFS
+                        </span>
+                      )}
+                      {integrityResults[record.id] === true && (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-bold bg-green-50 text-green-700 border border-green-200">
+                          <CheckCircle2 className="w-3.5 h-3.5" /> Integrity Verified ✓
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td className="py-4 px-6 text-right">
                     <button 

@@ -41,9 +41,8 @@ export default function PatientDashboard() {
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadError, setUploadError] = useState<string | null>(null);
-  const [useIPFS, setUseIPFS] = useState(true);
   const [downloadingRecordId, setDownloadingRecordId] = useState<number | null>(null);
-  const [integrityResults, setIntegrityResults] = useState<Record<number, boolean | null>>({});
+  const [integrityResults, setIntegrityResults] = useState<{ [key: number]: boolean | null }>({});
   const [user, setUser] = useState<any>(null);
 
   useEffect(() => {
@@ -116,7 +115,7 @@ export default function PatientDashboard() {
       formData.append('file_type', uploadType);
       formData.append('file', uploadFile);
 
-      const endpoint = useIPFS ? '/records/ipfs-upload' : '/records';
+      const endpoint = '/records/ipfs-upload';
       setUploadProgress(40);
 
       await fetchApi(endpoint, { method: 'POST', body: formData });
@@ -171,47 +170,6 @@ export default function PatientDashboard() {
       window.URL.revokeObjectURL(url);
     } catch (err: any) {
       alert(err.message || 'Failed to download from IPFS');
-    } finally {
-      setDownloadingRecordId(null);
-    }
-  };
-
-  const handleDownload = async (recordId: number) => {
-    try {
-      setDownloadingRecordId(recordId);
-      
-      const token = localStorage.getItem('access_token');
-      const apiUrl = import.meta.env.DEV ? 'http://localhost:8000' : 'https://backend-production-30645.up.railway.app';
-      const response = await fetch(`${apiUrl}/records/${recordId}/download`, {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
-      
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.detail || 'Download failed');
-      }
-      
-      let filename = `record_${recordId}.enc`;
-      const disposition = response.headers.get('Content-Disposition');
-      if (disposition && disposition.indexOf('filename=') !== -1) {
-        const matches = /filename="([^"]*)"/.exec(disposition);
-        if (matches != null && matches[1]) filename = matches[1];
-      }
-      
-      const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      window.URL.revokeObjectURL(url);
-    } catch (err: any) {
-      alert(err.message || 'Failed to download record');
     } finally {
       setDownloadingRecordId(null);
     }
@@ -381,7 +339,7 @@ export default function PatientDashboard() {
                         </div>
                       </div>
                       <button 
-                        onClick={() => record.ipfs_cid ? handleIPFSDownload(record) : handleDownload(record.id)}
+                        onClick={() => handleIPFSDownload(record)}
                         disabled={downloadingRecordId === record.id}
                         className="btn-secondary w-full sm:w-auto text-sm px-3 py-1.5 flex justify-center items-center gap-1.5"
                       >
@@ -390,7 +348,7 @@ export default function PatientDashboard() {
                         ) : (
                           <Download className="w-4 h-4" />
                         )}
-                        {record.ipfs_cid ? 'Download (IPFS)' : 'Download'}
+                        Download
                       </button>
                     </div>
                   ))}
@@ -476,23 +434,6 @@ export default function PatientDashboard() {
               </button>
             </div>
             <form onSubmit={handleUpload} className="p-6 space-y-4">
-
-              {/* Storage toggle */}
-              <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-lg border border-slate-200">
-                <Globe className="w-4 h-4 text-violet-600 shrink-0" />
-                <div className="flex-1">
-                  <p className="text-xs font-semibold text-slate-700">Upload to IPFS (Pinata)</p>
-                  <p className="text-xs text-slate-500">Encrypted on-chain reference only</p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setUseIPFS(v => !v)}
-                  className={`relative w-10 h-5 rounded-full transition-colors ${ useIPFS ? 'bg-violet-600' : 'bg-slate-300'}`}
-                >
-                  <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${useIPFS ? 'translate-x-5' : ''}`} />
-                </button>
-              </div>
-
               <div>
                 <label className="block text-sm font-semibold text-slate-700 mb-1.5">Document Type</label>
                 <select value={uploadType} onChange={(e) => setUploadType(e.target.value)} className="input-field">
@@ -559,9 +500,9 @@ export default function PatientDashboard() {
                   className="w-full btn-primary py-2.5 flex items-center justify-center gap-2"
                 >
                   {uploading ? (
-                    <><Loader2 className="w-4 h-4 animate-spin" /> {useIPFS ? 'Encrypting & Pinning to IPFS…' : 'Encrypting & Uploading…'}</>
+                    <><Loader2 className="w-4 h-4 animate-spin" /> Encrypting & Pinning to IPFS…</>
                   ) : (
-                    <><Upload className="w-4 h-4" /> {useIPFS ? 'Secure Upload to IPFS' : 'Secure Upload'}</>
+                    <><Upload className="w-4 h-4" /> Secure Upload to IPFS</>
                   )}
                 </button>
               </div>

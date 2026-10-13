@@ -9,7 +9,7 @@ export default function Login() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [healthStatus, setHealthStatus] = useState<{neon_active?: boolean, supabase_active?: boolean} | null>(null);
+  const [healthStatus, setHealthStatus] = useState<{database_active?: boolean, ipfs_active?: boolean} | null>(null);
 
   useEffect(() => {
     fetchApi('/health').then(setHealthStatus).catch(console.error);
@@ -135,18 +135,12 @@ export default function Login() {
             <p className="text-slate-500 mt-2">Please enter your details to sign in.</p>
           </div>
           
-          {healthStatus && (healthStatus.neon_active === false || healthStatus.supabase_active === false) && (
+          {healthStatus && healthStatus.database_active === false && (
             <div className="bg-amber-50 text-amber-800 p-4 rounded-xl text-sm mb-6 border border-amber-200 shadow-sm flex gap-3">
               <AlertCircle className="w-5 h-5 shrink-0 text-amber-600" />
               <div>
-                <p className="font-bold mb-1">Service Maintenance</p>
-                <p>
-                  {!healthStatus.neon_active && !healthStatus.supabase_active 
-                    ? "Database systems are currently inactive." 
-                    : !healthStatus.neon_active 
-                      ? "Primary database is currently inactive." 
-                      : "Storage system is currently inactive."}
-                </p>
+                <p className="font-bold mb-1">Service Notice</p>
+                <p>Primary database is currently inactive or connecting.</p>
                 <p className="mt-1 opacity-80 text-xs">Login attempts may experience delays.</p>
               </div>
             </div>
