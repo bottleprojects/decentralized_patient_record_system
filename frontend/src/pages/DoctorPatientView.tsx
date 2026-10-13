@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { ArrowLeft, CheckCircle2, Loader2, Clock, FileDown, FileText } from 'lucide-react';
-import { fetchApi } from '../lib/api';
+import { fetchApi, API_URL } from '../lib/api';
 
 interface Record {
   id: number;
@@ -49,8 +49,7 @@ export default function DoctorPatientView() {
       setDownloadingRecordId(recordId);
       
       const token = localStorage.getItem('access_token');
-      const apiUrl = import.meta.env.DEV ? 'http://localhost:8000' : 'https://backend-production-30645.up.railway.app';
-      const response = await fetch(`${apiUrl}/records/${recordId}/download`, {
+      const response = await fetch(`${API_URL}/records/${recordId}/download`, {
         method: 'GET',
         headers: {
           'Authorization': `Bearer ${token}`

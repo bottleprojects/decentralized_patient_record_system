@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { ShieldCheck, ShieldAlert, FileText, Download, Loader2, User, FileHeart, Bell, Upload, X, Shield, Globe } from 'lucide-react';
-import { fetchApi } from '../lib/api';
+import { fetchApi, API_URL } from '../lib/api';
 
 const IPFS_MAX_MB = 50;
 
@@ -140,8 +140,7 @@ export default function PatientDashboard() {
       setIntegrityResults(prev => ({ ...prev, [record.id]: null }));
 
       const token = localStorage.getItem('access_token');
-      const apiUrl = import.meta.env.DEV ? 'http://localhost:8000' : 'https://backend-production-30645.up.railway.app';
-      const response = await fetch(`${apiUrl}/records/${record.id}/ipfs-download`, {
+      const response = await fetch(`${API_URL}/records/${record.id}/ipfs-download`, {
         method: 'GET',
         headers: { 'Authorization': `Bearer ${token}` },
       });

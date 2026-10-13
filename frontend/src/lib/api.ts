@@ -1,4 +1,4 @@
-const API_URL = import.meta.env.DEV ? 'http://localhost:8000' : 'https://backend-production-30645.up.railway.app';
+export const API_URL = (import.meta.env.VITE_API_URL || '').replace(/\/+$/, '');
 
 export async function fetchApi(endpoint: string, options: RequestInit = {}) {
   const token = localStorage.getItem('access_token');

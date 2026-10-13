@@ -89,17 +89,44 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+# CORS configuration
+ENVIRONMENT = os.getenv("ENVIRONMENT", "development").lower()
+FRONTEND_URL = os.getenv("FRONTEND_URL", "").strip()
+
+if ENVIRONMENT == "production":
+    if not FRONTEND_URL or FRONTEND_URL == "*":
+        raise RuntimeError(
+            "FATAL: In production, FRONTEND_URL must be set to the allowed frontend origin(s) "
+            "(e.g. 'https://my-app.vercel.app') and wildcard '*' is not allowed."
+        )
+    allowed_origins = [o.strip() for o in FRONTEND_URL.split(",") if o.strip()]
+else:
+    if FRONTEND_URL and FRONTEND_URL != "*":
+        allowed_origins = [o.strip() for o in FRONTEND_URL.split(",") if o.strip()]
+    else:
+        allowed_origins = [
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+        ]
+
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
+    origin = request.headers.get("origin")
+    headers = {}
+    if origin and (allowed_origins == ["*"] or origin in allowed_origins):
+        headers["Access-Control-Allow-Origin"] = origin
+        headers["Access-Control-Allow-Credentials"] = "true"
     return JSONResponse(
         status_code=500,
         content={"message": "Internal Server Error", "detail": str(exc), "traceback": traceback.format_exc()},
-        headers={"Access-Control-Allow-Origin": "*", "Access-Control-Allow-Credentials": "true"}
+        headers=headers
     )
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Restrict in production
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
