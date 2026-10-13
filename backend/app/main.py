@@ -11,70 +11,47 @@ Base.metadata.create_all(bind=engine)
 
 # Automatically add missing columns (simple migration for existing db)
 from sqlalchemy import text
+is_postgres = engine.dialect.name == "postgresql"
 with engine.connect() as conn:
-    try:
-        conn.execute(text("ALTER TABLE users DROP COLUMN mfa_secret"))
-        conn.commit()
-    except Exception:
-        conn.rollback()
-    try:
-        conn.execute(text("ALTER TABLE users ADD COLUMN verification_status VARCHAR DEFAULT 'pending'"))
-        conn.commit()
-    except Exception:
-        conn.rollback()
-    try:
-        conn.execute(text("ALTER TABLE users ADD COLUMN license_number VARCHAR"))
-        conn.commit()
-    except Exception:
-        conn.rollback()
-    try:
-        conn.execute(text("ALTER TABLE medical_records ADD COLUMN doctor_id INTEGER REFERENCES users(id)"))
-        conn.commit()
-    except Exception:
-        conn.rollback()
-    try:
-        conn.execute(text("ALTER TABLE medical_records ALTER COLUMN doctor_id DROP NOT NULL"))
-        conn.commit()
-    except Exception as e:
-        conn.rollback()
-        print("MIGRATION ERROR (drop not null):", e)
-    try:
-        conn.execute(text("ALTER TABLE medical_records ADD COLUMN description VARCHAR"))
-        conn.commit()
-    except Exception:
-        conn.rollback()
-    try:
-        conn.execute(text("ALTER TABLE medical_records ADD COLUMN ipfs_cid VARCHAR"))
-        conn.commit()
-    except Exception:
-        conn.rollback()
-    try:
-        conn.execute(text("ALTER TABLE medical_records ADD COLUMN ipfs_file_name VARCHAR"))
-        conn.commit()
-    except Exception:
-        conn.rollback()
-    try:
-        conn.execute(text("ALTER TABLE medical_records ADD COLUMN ipfs_file_size INTEGER"))
-        conn.commit()
-    except Exception:
-        conn.rollback()
-    try:
-        conn.execute(text("ALTER TABLE medical_records ALTER COLUMN supabase_file_path DROP NOT NULL"))
-        conn.commit()
-    except Exception:
-        conn.rollback()
-    try:
-        conn.execute(text("ALTER TABLE medical_records ALTER COLUMN record_hash DROP NOT NULL"))
-        conn.commit()
-    except Exception:
-        conn.rollback()
-    try:
-        # Delete any records that failed blockchain verification (tx_hash is NULL) or are corrupted
-        conn.execute(text("DELETE FROM medical_records WHERE blockchain_tx_hash IS NULL OR blockchain_tx_hash = '' OR created_at IS NULL OR file_type IS NULL OR file_type = ''"))
-        conn.commit()
-    except Exception as e:
-        conn.rollback()
-        print("MIGRATION ERROR (cleanup pending records):", e)
+    if is_postgres:
+        pg_migrations = [
+            "ALTER TABLE users DROP COLUMN IF EXISTS mfa_secret",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS verification_status VARCHAR DEFAULT 'pending'",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS license_number VARCHAR",
+            "ALTER TABLE medical_records ADD COLUMN IF NOT EXISTS doctor_id INTEGER REFERENCES users(id)",
+            "ALTER TABLE medical_records ALTER COLUMN doctor_id DROP NOT NULL",
+            "ALTER TABLE medical_records ADD COLUMN IF NOT EXISTS description VARCHAR",
+            "ALTER TABLE medical_records ADD COLUMN IF NOT EXISTS ipfs_cid VARCHAR",
+            "ALTER TABLE medical_records ADD COLUMN IF NOT EXISTS ipfs_file_name VARCHAR",
+            "ALTER TABLE medical_records ADD COLUMN IF NOT EXISTS ipfs_file_size INTEGER",
+            "ALTER TABLE medical_records ALTER COLUMN supabase_file_path DROP NOT NULL",
+            "ALTER TABLE medical_records ALTER COLUMN record_hash DROP NOT NULL",
+            "DELETE FROM medical_records WHERE blockchain_tx_hash IS NULL OR blockchain_tx_hash = '' OR created_at IS NULL OR file_type IS NULL OR file_type = ''",
+        ]
+        for stmt in pg_migrations:
+            try:
+                conn.execute(text(stmt))
+                conn.commit()
+            except Exception:
+                conn.rollback()
+    else:
+        # SQLite compatible migrations
+        sqlite_migrations = [
+            "ALTER TABLE users ADD COLUMN verification_status VARCHAR DEFAULT 'pending'",
+            "ALTER TABLE users ADD COLUMN license_number VARCHAR",
+            "ALTER TABLE medical_records ADD COLUMN doctor_id INTEGER",
+            "ALTER TABLE medical_records ADD COLUMN description VARCHAR",
+            "ALTER TABLE medical_records ADD COLUMN ipfs_cid VARCHAR",
+            "ALTER TABLE medical_records ADD COLUMN ipfs_file_name VARCHAR",
+            "ALTER TABLE medical_records ADD COLUMN ipfs_file_size INTEGER",
+            "DELETE FROM medical_records WHERE blockchain_tx_hash IS NULL OR blockchain_tx_hash = '' OR created_at IS NULL OR file_type IS NULL OR file_type = ''",
+        ]
+        for stmt in sqlite_migrations:
+            try:
+                conn.execute(text(stmt))
+                conn.commit()
+            except Exception:
+                conn.rollback()
 
 import traceback
 from fastapi import Request
