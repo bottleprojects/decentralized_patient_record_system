@@ -1,0 +1,16 @@
+node_modules/
+__pycache__/
+.env
+venv/
+.venv/
+*.log
+artifacts/
+cache/
+dist/
+build/
+coverage/
+.env
+.env.*
+!.env.example
+.vscode/
+test.json

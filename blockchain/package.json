@@ -1,0 +1,12 @@
+{
+  "name": "blockchain",
+  "version": "1.0.0",
+  "main": "index.js",
+  "license": "MIT",
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^4.0.0",
+    "dotenv": "^16.4.5",
+    "hardhat": "^2.19.4",
+    "ts-node": "^10.9.2"
+  }
+}
