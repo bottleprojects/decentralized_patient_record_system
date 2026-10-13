@@ -4,6 +4,8 @@ from datetime import datetime
 from web3 import Web3
 from web3.middleware import ExtraDataToPOAMiddleware
 
+from pathlib import Path
+
 RPC_URL = os.getenv("SEPOLIA_RPC_URL")
 PRIVATE_KEY = os.getenv("PRIVATE_KEY")
 CONTRACT_ADDRESS = os.getenv("CONTRACT_ADDRESS")
@@ -13,13 +15,13 @@ SIMULATE_BLOCKCHAIN = os.getenv("SIMULATE_BLOCKCHAIN", "false").lower() == "true
 if ENVIRONMENT == "production" and SIMULATE_BLOCKCHAIN:
     raise RuntimeError("FATAL [Blockchain]: SIMULATE_BLOCKCHAIN cannot be enabled in the production environment.")
 
-# ABI includes both original and new IPFS functions
-CONTRACT_ABI = json.loads('''[
-    {"inputs": [{"internalType": "string","name": "recordId","type": "string"},{"internalType": "string","name": "recordHash","type": "string"}],"name": "storeRecordHash","outputs": [],"stateMutability": "nonpayable","type": "function"},
-    {"inputs": [{"internalType": "string","name": "recordId","type": "string"}],"name": "getRecordHash","outputs": [{"internalType": "string","name": "","type": "string"}],"stateMutability": "view","type": "function"},
-    {"inputs": [{"internalType": "string","name": "recordId","type": "string"},{"internalType": "string","name": "cid","type": "string"},{"internalType": "string","name": "sha256Hash","type": "string"},{"internalType": "string","name": "fileName","type": "string"},{"internalType": "string","name": "fileType","type": "string"},{"internalType": "uint256","name": "fileSize","type": "uint256"}],"name": "storeIPFSRecord","outputs": [],"stateMutability": "nonpayable","type": "function"},
-    {"inputs": [{"internalType": "string","name": "recordId","type": "string"}],"name": "getIPFSRecord","outputs": [{"internalType": "string","name": "cid","type": "string"},{"internalType": "string","name": "sha256Hash","type": "string"},{"internalType": "string","name": "fileName","type": "string"},{"internalType": "string","name": "fileType","type": "string"},{"internalType": "uint256","name": "fileSize","type": "uint256"},{"internalType": "uint256","name": "timestamp","type": "uint256"}],"stateMutability": "view","type": "function"}
-]''')
+# Load ABI from file located inside backend folder
+ABI_FILE = Path(__file__).resolve().parent.parent / "contracts" / "PatientRecord.json"
+if ABI_FILE.exists():
+    with open(ABI_FILE, "r", encoding="utf-8") as _f:
+        CONTRACT_ABI = json.load(_f)
+else:
+    raise RuntimeError(f"FATAL [Blockchain]: Contract ABI file not found at {ABI_FILE}")
 
 
 class BlockchainService:
@@ -129,6 +131,43 @@ class BlockchainService:
                 record_id, cid, sha256_hash, file_name, file_type, file_size
             )
         )
+
+    def get_ipfs_record(self, record_id: str) -> dict:
+        """
+        Reads the anchored IPFS metadata directly from the Sepolia contract.
+        Returns dict with cid, sha256_hash, file_name, file_type, file_size, timestamp.
+        """
+        if not self.w3 or not self.w3.is_connected() or not self.contract:
+            if self.simulate_blockchain:
+                return {
+                    "cid": "QmSimulatedCID",
+                    "sha256_hash": "simulated_hash",
+                    "file_name": "simulated.pdf",
+                    "file_type": "PDF",
+                    "file_size": 1024,
+                    "timestamp": int(datetime.utcnow().timestamp()),
+                }
+            raise RuntimeError("Blockchain service is not connected to Sepolia to verify on-chain record.")
+
+        data = self.contract.functions.getIPFSRecord(record_id).call()
+        return {
+            "cid": data[0],
+            "sha256_hash": data[1],
+            "file_name": data[2],
+            "file_type": data[3],
+            "file_size": data[4],
+            "timestamp": data[5],
+        }
+
+    def get_record_hash(self, record_id: str) -> str:
+        """
+        Reads hash from public mapping recordHashes(recordId).
+        """
+        if not self.w3 or not self.w3.is_connected() or not self.contract:
+            if self.simulate_blockchain:
+                return "simulated_hash"
+            raise RuntimeError("Blockchain service is not connected to Sepolia to verify on-chain record.")
+        return self.contract.functions.recordHashes(record_id).call()
 
 
 blockchain_service = BlockchainService()

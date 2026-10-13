@@ -1,0 +1,313 @@
+[
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "patient",
+        "type": "address"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "doctor",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "string",
+        "name": "recordId",
+        "type": "string"
+      }
+    ],
+    "name": "ConsentGranted",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "patient",
+        "type": "address"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "doctor",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "string",
+        "name": "recordId",
+        "type": "string"
+      }
+    ],
+    "name": "ConsentRevoked",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "patient",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "string",
+        "name": "recordId",
+        "type": "string"
+      },
+      {
+        "indexed": false,
+        "internalType": "string",
+        "name": "cid",
+        "type": "string"
+      },
+      {
+        "indexed": false,
+        "internalType": "string",
+        "name": "sha256Hash",
+        "type": "string"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "timestamp",
+        "type": "uint256"
+      }
+    ],
+    "name": "IPFSRecordStored",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "patient",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "string",
+        "name": "recordId",
+        "type": "string"
+      },
+      {
+        "indexed": false,
+        "internalType": "string",
+        "name": "ipfsOrStorageHash",
+        "type": "string"
+      }
+    ],
+    "name": "RecordHashed",
+    "type": "event"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "string",
+        "name": "recordId",
+        "type": "string"
+      }
+    ],
+    "name": "getIPFSRecord",
+    "outputs": [
+      {
+        "internalType": "string",
+        "name": "cid",
+        "type": "string"
+      },
+      {
+        "internalType": "string",
+        "name": "sha256Hash",
+        "type": "string"
+      },
+      {
+        "internalType": "string",
+        "name": "fileName",
+        "type": "string"
+      },
+      {
+        "internalType": "string",
+        "name": "fileType",
+        "type": "string"
+      },
+      {
+        "internalType": "uint256",
+        "name": "fileSize",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "timestamp",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "doctor",
+        "type": "address"
+      },
+      {
+        "internalType": "string",
+        "name": "recordId",
+        "type": "string"
+      }
+    ],
+    "name": "grantConsent",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "string",
+        "name": "",
+        "type": "string"
+      }
+    ],
+    "name": "ipfsRecords",
+    "outputs": [
+      {
+        "internalType": "string",
+        "name": "cid",
+        "type": "string"
+      },
+      {
+        "internalType": "string",
+        "name": "sha256Hash",
+        "type": "string"
+      },
+      {
+        "internalType": "string",
+        "name": "fileName",
+        "type": "string"
+      },
+      {
+        "internalType": "string",
+        "name": "fileType",
+        "type": "string"
+      },
+      {
+        "internalType": "uint256",
+        "name": "fileSize",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "timestamp",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "string",
+        "name": "",
+        "type": "string"
+      }
+    ],
+    "name": "recordHashes",
+    "outputs": [
+      {
+        "internalType": "string",
+        "name": "",
+        "type": "string"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "doctor",
+        "type": "address"
+      },
+      {
+        "internalType": "string",
+        "name": "recordId",
+        "type": "string"
+      }
+    ],
+    "name": "revokeConsent",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "string",
+        "name": "recordId",
+        "type": "string"
+      },
+      {
+        "internalType": "string",
+        "name": "cid",
+        "type": "string"
+      },
+      {
+        "internalType": "string",
+        "name": "sha256Hash",
+        "type": "string"
+      },
+      {
+        "internalType": "string",
+        "name": "fileName",
+        "type": "string"
+      },
+      {
+        "internalType": "string",
+        "name": "fileType",
+        "type": "string"
+      },
+      {
+        "internalType": "uint256",
+        "name": "fileSize",
+        "type": "uint256"
+      }
+    ],
+    "name": "storeIPFSRecord",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "string",
+        "name": "recordId",
+        "type": "string"
+      },
+      {
+        "internalType": "string",
+        "name": "hashValue",
+        "type": "string"
+      }
+    ],
+    "name": "storeRecordHash",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  }
+]

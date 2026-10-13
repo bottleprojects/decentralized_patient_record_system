@@ -15,3 +15,4 @@ coverage/
 .vscode/
 test.json
 *.db
+.DS_Store
