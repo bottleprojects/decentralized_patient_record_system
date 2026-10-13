@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
 import { Shield, Activity, Users, FileText, LogOut, Clock, Loader2, KeyRound, Menu, X } from 'lucide-react';
 import { fetchApi } from '../lib/api';
+import DemoBanner from '../components/DemoBanner';
 
 export default function MainLayout() {
   const navigate = useNavigate();
@@ -163,6 +164,7 @@ export default function MainLayout() {
         {/* Scrollable Content */}
         <div className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">
           <div className="max-w-6xl mx-auto pb-12">
+            <DemoBanner className="mb-6" />
             <Outlet />
           </div>
         </div>

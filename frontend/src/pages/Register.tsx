@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { fetchApi } from '../lib/api';
 import { Activity, Loader2, AlertCircle, User, Stethoscope } from 'lucide-react';
+import DemoBanner from '../components/DemoBanner';
 
 export default function Register() {
   const navigate = useNavigate();
@@ -131,11 +132,13 @@ export default function Register() {
             </div>
           </div>
           
-          <div className="mb-10 text-center lg:text-left">
+          <div className="mb-8 text-center lg:text-left">
             <h2 className="text-3xl font-bold text-slate-900 tracking-tight">Create Identity</h2>
             <p className="text-slate-500 mt-2">Join the Decentralized Patient Record System.</p>
           </div>
           
+          <DemoBanner className="mb-6" />
+
           {error && (
             <div className="bg-red-50 text-red-700 p-4 rounded-xl text-sm mb-6 border border-red-200 flex items-start gap-3 shadow-sm">
               <AlertCircle className="w-5 h-5 shrink-0 text-red-500" />
