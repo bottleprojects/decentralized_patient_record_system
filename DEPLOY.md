@@ -1,0 +1,177 @@
+# Production Deployment Guide: Decentralized Patient Record System (DPRMS)
+
+This guide provides click-by-click instructions to deploy the DPRMS full-stack application for 24/7 public cloud operation. Once deployed, the entire system runs independently in the cloud with zero dependence on your local machine.
+
+---
+
+## Architecture Overview
+
+- **Frontend**: React + TypeScript (Vite) hosted on **Vercel** or **Render Static Site**.
+- **Backend**: FastAPI (Python 3.11) hosted as a Web Service on **Render**.
+- **Database**: Hosted PostgreSQL on **Neon**, **Render Postgres**, or **Supabase**.
+- **File Storage**: Encrypted (AES-256-GCM) off-chain file storage via **Pinata IPFS**.
+- **Blockchain**: Smart contract (`PatientRecord.sol`) deployed on **Ethereum Sepolia Testnet** for anchoring IPFS CIDs and SHA-256 integrity hashes.
+
+---
+
+## Required Environment Variables (Names Only)
+
+### Backend (Render Web Service)
+| Variable Name | Description |
+|---|---|
+| `ENVIRONMENT` | Must be set to `production`. Rejects SQLite fallback and missing critical configs. |
+| `DATABASE_URL` | Hosted PostgreSQL connection URI (e.g. `postgresql://...`). |
+| `JWT_SECRET_KEY` | Secret key for signing authentication JWT tokens (min 16 characters). |
+| `ENCRYPTION_KEY` | 32-byte Base64-encoded key for AES-256-GCM client file encryption. |
+| `SEPOLIA_RPC_URL` | Ethereum Sepolia testnet RPC URL (e.g. from Alchemy or Infura). |
+| `PRIVATE_KEY` | Throwaway Ethereum wallet private key (hex) funded with Sepolia ETH. |
+| `CONTRACT_ADDRESS` | Deployed `PatientRecord.sol` address on Sepolia. |
+| `PINATA_API_KEY` | Pinata IPFS API Key. |
+| `PINATA_API_SECRET` | Pinata IPFS API Secret. |
+| `PINATA_GATEWAY` | Pinata Gateway URL (default: `https://gateway.pinata.cloud`). |
+| `FRONTEND_URL` | Public URL of the deployed frontend (e.g. `https://your-app.vercel.app`). No wildcard `*`. |
+| `MAX_DAILY_TRANSACTIONS` | (Optional) Cap on daily on-chain anchoring transactions (default: `50`). |
+
+### Frontend (Vercel or Render Static Site)
+| Variable Name | Description |
+|---|---|
+| `VITE_API_URL` | Public base URL of the deployed Render backend (e.g. `https://dprms-backend.onrender.com`). |
+
+---
+
+## Step 1: Provision Hosted PostgreSQL Database
+
+You can use **Neon.tech** (recommended for serverless Postgres with pooling) or **Render PostgreSQL**.
+
+### Option A: Neon.tech (Recommended)
+1. Go to [https://neon.tech](https://neon.tech) and log in or create a free account.
+2. Click **Create Project**.
+3. Name your project (e.g., `dprms-database`), select your nearest cloud region, and click **Create project**.
+4. On the project dashboard, locate the **Connection Details** card.
+5. Ensure the dropdown is set to **Pooled connection** and **Postgres**.
+6. Copy the connection string. It will look like:
+   `postgresql://neondb_owner:YOUR_PASSWORD@ep-xyz-pooler.us-east-2.aws.neon.tech/neondb?sslmode=require`
+   *(Save this URI for the backend `DATABASE_URL`)*.
+
+---
+
+## Step 2: Deploy Backend on Render
+
+1. Log in to [https://render.com](https://render.com).
+2. Click **New +** in the top navigation and select **Web Service**.
+3. Connect your GitHub repository (`decentralized_patient_record_system`).
+4. Select the branch: `feature/ipfs-storage` (or `main` if merged).
+5. Fill in the service configuration details:
+   - **Name**: `dprms-backend`
+   - **Region**: Choose a region close to your database (e.g., `Oregon (US West)` or `Frankfurt (EU Central)`).
+   - **Root Directory**: `backend`
+   - **Runtime**: `Python 3`
+   - **Build Command**: `pip install -r requirements.txt`
+   - **Start Command**: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
+   - **Instance Type**: `Free`
+6. Click **Advanced** and set:
+   - **Health Check Path**: `/health`
+   - **Auto-Deploy**: `Yes`
+7. In the **Environment Variables** section, add each key:
+   - `ENVIRONMENT`: `production`
+   - `DATABASE_URL`: *(Paste your Neon or Render PostgreSQL connection URI)*
+   - `JWT_SECRET_KEY`: *(Generate using command below)*
+   - `ENCRYPTION_KEY`: *(Generate using command below)*
+   - `SEPOLIA_RPC_URL`: *(Your Alchemy or Infura Sepolia endpoint)*
+   - `PRIVATE_KEY`: *(Your throwaway Sepolia wallet private key)*
+   - `CONTRACT_ADDRESS`: *(Your deployed PatientRecord contract address)*
+   - `PINATA_API_KEY`: *(Your Pinata API Key)*
+   - `PINATA_API_SECRET`: *(Your Pinata API Secret)*
+   - `PINATA_GATEWAY`: `https://gateway.pinata.cloud`
+   - `FRONTEND_URL`: *(Temporarily enter `http://localhost:5173` or your planned Vercel URL, then update in Step 4)*
+8. Click **Deploy Web Service**.
+9. Wait 2-3 minutes for Render to build and start the service. Once deployed, note your backend public URL:
+   `https://dprms-backend.onrender.com`
+10. Test health by opening: `https://dprms-backend.onrender.com/health` in your browser. Both database and Pinata should report connected.
+
+> **Helper Commands to Generate Secrets Locally (Run in Terminal):**
+> ```bash
+> # Generate JWT_SECRET_KEY (32-byte hex)
+> python3 -c "import secrets; print(secrets.token_hex(32))"
+>
+> # Generate ENCRYPTION_KEY (32-byte base64)
+> python3 -c "import os,base64; print(base64.b64encode(os.urandom(32)).decode())"
+> ```
+
+---
+
+## Step 3: Deploy Frontend
+
+You can deploy the Vite React frontend on **Vercel** (recommended) or as a **Render Static Site**.
+
+### Option A: Deploy on Vercel (Recommended)
+1. Log in to [https://vercel.com](https://vercel.com).
+2. Click **Add New...** → **Project**.
+3. Import your GitHub repository (`decentralized_patient_record_system`).
+4. Configure project settings:
+   - **Framework Preset**: `Vite`
+   - **Root Directory**: Click *Edit* and select `frontend`.
+   - **Build Command**: `npm run build`
+   - **Output Directory**: `dist`
+5. Expand **Environment Variables**:
+   - Key: `VITE_API_URL`
+   - Value: `https://dprms-backend.onrender.com` *(Replace with your actual Render backend URL without trailing slash)*
+6. Click **Deploy**.
+7. Once deployed, copy your public Vercel production URL:
+   `https://your-project.vercel.app`
+
+### Option B: Deploy on Render Static Site
+1. In your Render Dashboard, click **New +** → **Static Site**.
+2. Connect your GitHub repository.
+3. Configure settings:
+   - **Name**: `dprms-frontend`
+   - **Root Directory**: `frontend`
+   - **Build Command**: `npm install && npm run build`
+   - **Publish Directory**: `dist`
+4. Under **Environment Variables**:
+   - `VITE_API_URL`: `https://dprms-backend.onrender.com`
+5. Under **Redirects/Rewrites**:
+   - Add Rewrite: `/*` -> `/index.html` (Status: `Rewrite`) to support SPA client routing.
+6. Click **Create Static Site**.
+
+---
+
+## Step 4: Finalize CORS on Render Backend
+
+1. Return to your Render Dashboard and open `dprms-backend`.
+2. Go to **Environment** tab.
+3. Update `FRONTEND_URL` with your exact frontend URL (e.g. `https://your-project.vercel.app`).
+4. Click **Save Changes**. Render will automatically trigger a zero-downtime redeploy.
+
+---
+
+## Post-Deploy Validation Checklist
+
+Perform this verification from a phone or non-local device (with your Mac closed/asleep):
+
+- [ ] **1. Public Accessibility**: Open the frontend URL on a smartphone using mobile cellular data (Wi-Fi off). Confirm the page loads instantly with SSL.
+- [ ] **2. Demo Disclaimer Banner**: Confirm the yellow banner displays prominently:
+  *"Demo project on a test network. Do not upload real patient data."*
+- [ ] **3. Service Health**: In a separate browser tab, navigate to `https://<backend-url>/health`. Confirm:
+  ```json
+  {
+    "status": "healthy",
+    "database": { "connected": true, "detail": "connected" },
+    "pinata": { "configured": true, "authenticated": true, "status_code": 200, "message": "Connected" },
+    "database_active": true,
+    "ipfs_active": true
+  }
+  ```
+- [ ] **4. Registration**: Register a new patient account (e.g. `patient_live@example.com`). Confirm identity is created in PostgreSQL and auto-logs in.
+- [ ] **5. Upload Medical Record**:
+  - Upload a test medical report, prescription, or image file (PDF, PNG, JPG).
+  - Verify that upload completes and the record appears in the list.
+  - Check that an IPFS CID (starts with `Qm` or `bafy`) and a Sepolia transaction hash (`0x...`) are present on the record card.
+- [ ] **6. Download with Integrity Verification**:
+  - Click **Download** on the newly created record.
+  - Confirm the decrypted file downloads properly to your phone/browser.
+  - Verify the green **Integrity Verified** badge displays, confirming that the decrypted file's SHA-256 hash matches the on-chain hash anchored on Sepolia.
+- [ ] **7. Statelessness / Persistence Verification**:
+  - In the Render dashboard, click **Manual Deploy** → **Deploy latest commit** (or restart the service). This restarts the container with a clean, empty disk.
+  - Refresh the patient dashboard on your phone.
+  - Confirm the user session, patient records, IPFS CIDs, and blockchain hashes are still completely intact.
