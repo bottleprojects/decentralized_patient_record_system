@@ -12,4 +12,5 @@ supabase>=2.3.4
 cryptography>=42.0.0
 email-validator>=2.1.0.post1
 pyotp==2.10.0
-qrcode==8.2  
+qrcode==8.2
+requests>=2.31.0

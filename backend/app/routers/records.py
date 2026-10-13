@@ -11,6 +11,10 @@ from ..services.auth import get_current_user
 from ..services.crypto import crypto_service
 from ..services.storage import storage_service
 from ..services.blockchain import blockchain_service
+from ..services.ipfs import ipfs_service
+
+# File size limit for IPFS uploads: 50 MB
+IPFS_MAX_SIZE_BYTES = 50 * 1024 * 1024
 
 router = APIRouter(prefix="/records", tags=["records"])
 
@@ -89,6 +93,107 @@ async def upload_record(
 
     return {"message": "Record uploaded and encrypted successfully", "record_id": record.id, "tx_hash": tx_hash}
 
+
+@router.post("/ipfs-upload", status_code=status.HTTP_201_CREATED)
+async def upload_record_ipfs(
+    patient_id: int = Form(...),
+    file_type: str = Form(...),
+    description: str = Form(None),
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Upload flow: Frontend → Backend → IPFS (Pinata).
+    Stores only CID + SHA-256 hash + metadata on-chain. File never touches the blockchain.
+    """
+    # Permission check (same rules as regular upload)
+    if current_user.role == RoleEnum.patient:
+        if patient_id != current_user.id:
+            raise HTTPException(status_code=403, detail="Patients can only upload their own records")
+        assigned_doctor_id = None
+    elif current_user.role == RoleEnum.doctor:
+        if current_user.verification_status != "verified":
+            raise HTTPException(status_code=403, detail="Your doctor account must be verified by an admin before uploading records")
+        consent = db.query(Consent).filter(
+            Consent.patient_id == patient_id,
+            Consent.doctor_id == current_user.id,
+            Consent.status == "active"
+        ).first()
+        if not consent:
+            raise HTTPException(status_code=403, detail="No active consent from this patient")
+        assigned_doctor_id = current_user.id
+    else:
+        raise HTTPException(status_code=403, detail="Admins cannot upload records")
+
+    # Read file
+    file_bytes = await file.read()
+
+    # File size validation (50 MB limit)
+    if len(file_bytes) > IPFS_MAX_SIZE_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File too large. Maximum allowed size is 50 MB (got {len(file_bytes) / (1024*1024):.1f} MB)."
+        )
+
+    # SHA-256 of original (pre-encrypt) file — this is what goes on-chain
+    original_hash = hashlib.sha256(file_bytes).hexdigest()
+
+    # AES-256-GCM encrypt BEFORE uploading to IPFS (IPFS is public)
+    encrypted_bytes = crypto_service.encrypt(file_bytes)
+
+    # Upload encrypted file to IPFS via Pinata
+    original_filename = file.filename or "medical_file"
+    ipfs_filename = f"{patient_id}_{uuid.uuid4()}_{original_filename}.enc"
+    try:
+        cid = ipfs_service.upload(encrypted_bytes, ipfs_filename)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"IPFS upload failed: {str(e)}")
+
+    # Store IPFS metadata on-chain: only CID + hash + file metadata (never the file itself)
+    record_uuid = str(uuid.uuid4())
+    tx_hash = None
+    try:
+        tx_hash = blockchain_service.store_ipfs_record(
+            record_uuid,
+            cid,
+            original_hash,
+            original_filename,
+            file_type,
+            len(file_bytes),
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Blockchain anchoring failed: {str(e)}")
+
+    # Save to database
+    record = MedicalRecord(
+        patient_id=patient_id,
+        doctor_id=assigned_doctor_id,
+        file_type=file_type,
+        supabase_file_path=None,      # Not using Supabase for this upload
+        ipfs_cid=cid,
+        ipfs_file_name=original_filename,
+        ipfs_file_size=len(file_bytes),
+        record_hash=original_hash,
+        blockchain_tx_hash=tx_hash,
+        description=description,
+    )
+    db.add(record)
+    audit = AuditLog(user_id=current_user.id, action="IPFS_UPLOAD_RECORD", resource_id=str(patient_id))
+    db.add(audit)
+    db.commit()
+    db.refresh(record)
+
+    return {
+        "message": "File encrypted and stored on IPFS successfully",
+        "record_id": record.id,
+        "cid": cid,
+        "sha256_hash": original_hash,
+        "tx_hash": tx_hash,
+        "file_size": len(file_bytes),
+        "file_name": original_filename,
+    }
+
 @router.get("")
 def get_records(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     if current_user.role == RoleEnum.admin:
@@ -100,6 +205,9 @@ def get_records(db: Session = Depends(get_db), current_user: User = Depends(get_
             "file_type": r.file_type or "General Health Record",
             "supabase_file_path": r.supabase_file_path,
             "ipfs_hash": r.ipfs_hash,
+            "ipfs_cid": r.ipfs_cid,
+            "ipfs_file_name": r.ipfs_file_name,
+            "ipfs_file_size": r.ipfs_file_size,
             "blockchain_tx_hash": r.blockchain_tx_hash,
             "record_hash": r.record_hash,
             "description": r.description,
@@ -119,6 +227,9 @@ def get_records(db: Session = Depends(get_db), current_user: User = Depends(get_
             "file_type": r.file_type or "General Health Record",
             "supabase_file_path": r.supabase_file_path,
             "ipfs_hash": r.ipfs_hash,
+            "ipfs_cid": r.ipfs_cid,
+            "ipfs_file_name": r.ipfs_file_name,
+            "ipfs_file_size": r.ipfs_file_size,
             "blockchain_tx_hash": r.blockchain_tx_hash,
             "record_hash": r.record_hash,
             "description": r.description,
@@ -137,6 +248,9 @@ def get_records(db: Session = Depends(get_db), current_user: User = Depends(get_
             "file_type": r.file_type or "General Health Record",
             "supabase_file_path": r.supabase_file_path,
             "ipfs_hash": r.ipfs_hash,
+            "ipfs_cid": r.ipfs_cid,
+            "ipfs_file_name": r.ipfs_file_name,
+            "ipfs_file_size": r.ipfs_file_size,
             "blockchain_tx_hash": r.blockchain_tx_hash,
             "record_hash": r.record_hash,
             "description": r.description,
@@ -245,4 +359,68 @@ def download_record(record_id: int, db: Session = Depends(get_db), current_user:
     db.add(audit)
     db.commit()
     
+    return Response(content=decrypted_bytes, headers=headers)
+
+
+@router.get("/{record_id}/ipfs-download")
+def download_record_ipfs(record_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """
+    Download flow: IPFS (via Pinata gateway) → Backend → decrypt → verify hash → Frontend.
+    Returns the decrypted file with an 'X-Integrity-Verified' header.
+    """
+    # 1. Get record
+    record = db.query(MedicalRecord).filter(MedicalRecord.id == record_id).first()
+    if not record:
+        raise HTTPException(status_code=404, detail="Record not found")
+    if not record.ipfs_cid:
+        raise HTTPException(status_code=400, detail="This record is not stored on IPFS. Use the regular download endpoint.")
+
+    # 2. Permission check (same as regular download)
+    if current_user.role == RoleEnum.patient:
+        if record.patient_id != current_user.id:
+            raise HTTPException(status_code=403, detail="Not authorized to access this record")
+    elif current_user.role == RoleEnum.doctor:
+        consent = db.query(Consent).filter(
+            Consent.patient_id == record.patient_id,
+            Consent.doctor_id == current_user.id,
+            Consent.status == "active"
+        ).first()
+        if not consent:
+            raise HTTPException(status_code=403, detail="No active consent from this patient")
+    else:
+        raise HTTPException(status_code=403, detail="Admins cannot download records")
+
+    # 3. Fetch encrypted bytes from IPFS
+    try:
+        encrypted_bytes = ipfs_service.download(record.ipfs_cid)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve file from IPFS: {e}")
+
+    # 4. Decrypt
+    try:
+        decrypted_bytes = crypto_service.decrypt(encrypted_bytes)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Failed to decrypt file — it may be corrupted.")
+
+    # 5. Integrity check: recompute SHA-256 and compare to on-chain hash stored in DB
+    recomputed_hash = hashlib.sha256(decrypted_bytes).hexdigest()
+    integrity_ok = (record.record_hash is not None) and (recomputed_hash == record.record_hash)
+
+    file_name = record.ipfs_file_name or f"record_{record_id}"
+
+    headers = {
+        "Content-Disposition": f'attachment; filename="{file_name}"',
+        "X-Integrity-Verified": "true" if integrity_ok else "false",
+        "X-Record-Hash": record.record_hash or "",
+        "X-Recomputed-Hash": recomputed_hash,
+        "X-IPFS-CID": record.ipfs_cid,
+        # Expose custom headers to the browser
+        "Access-Control-Expose-Headers": "X-Integrity-Verified, X-Record-Hash, X-Recomputed-Hash, X-IPFS-CID, Content-Disposition",
+    }
+
+    # Audit log
+    audit = AuditLog(user_id=current_user.id, action="IPFS_DOWNLOAD_RECORD", resource_id=str(record.id))
+    db.add(audit)
+    db.commit()
+
     return Response(content=decrypted_bytes, headers=headers)

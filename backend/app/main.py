@@ -44,6 +44,31 @@ with engine.connect() as conn:
     except Exception:
         conn.rollback()
     try:
+        conn.execute(text("ALTER TABLE medical_records ADD COLUMN ipfs_cid VARCHAR"))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+    try:
+        conn.execute(text("ALTER TABLE medical_records ADD COLUMN ipfs_file_name VARCHAR"))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+    try:
+        conn.execute(text("ALTER TABLE medical_records ADD COLUMN ipfs_file_size INTEGER"))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+    try:
+        conn.execute(text("ALTER TABLE medical_records ALTER COLUMN supabase_file_path DROP NOT NULL"))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+    try:
+        conn.execute(text("ALTER TABLE medical_records ALTER COLUMN record_hash DROP NOT NULL"))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+    try:
         # Delete any records that failed blockchain verification (tx_hash is NULL) or are corrupted
         conn.execute(text("DELETE FROM medical_records WHERE blockchain_tx_hash IS NULL OR blockchain_tx_hash = '' OR created_at IS NULL OR file_type IS NULL OR file_type = ''"))
         conn.commit()
