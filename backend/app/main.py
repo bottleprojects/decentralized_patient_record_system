@@ -1,5 +1,6 @@
 import os
-from fastapi import FastAPI
+# pyrefly: ignore [missing-import]
+from fastapi import FastAPI, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -117,30 +118,34 @@ from sqlalchemy.orm import Session
 from .database import get_db
 
 @app.get("/health")
-def health_check():
-    status_db = False
-    status_ipfs = False
-    
-    # Check Database
+def health_check(response: Response):
+    db_healthy = False
+    db_detail = "disconnected"
     try:
         from sqlalchemy import text
         from .database import SessionLocal
         with SessionLocal() as db:
             db.execute(text("SELECT 1"))
-            status_db = True
-    except Exception:
-        pass
-        
-    # Check IPFS / Pinata configuration
-    pinata_key = os.getenv("PINATA_API_KEY")
-    pinata_secret = os.getenv("PINATA_API_SECRET")
-    if pinata_key and pinata_secret and "your" not in pinata_key.lower():
-        status_ipfs = True
+            db_healthy = True
+            db_detail = "connected"
+    except Exception as e:
+        db_detail = f"Database connection error: {str(e)}"
+
+    from .services.ipfs import ipfs_service
+    pinata_status = ipfs_service.check_health()
+
+    if not db_healthy:
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
 
     return {
-        "status": "ok" if status_db else "error",
-        "database_active": status_db,
-        "ipfs_active": status_ipfs
+        "status": "healthy" if (db_healthy and pinata_status.get("authenticated")) else ("degraded" if db_healthy else "unhealthy"),
+        "database": {
+            "connected": db_healthy,
+            "detail": db_detail,
+        },
+        "pinata": pinata_status,
+        "database_active": db_healthy,
+        "ipfs_active": pinata_status.get("authenticated", False),
     }
 
 # Mount the frontend dist folder if it exists

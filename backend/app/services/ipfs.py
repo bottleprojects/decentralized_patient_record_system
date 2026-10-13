@@ -44,5 +44,34 @@ class IPFSService:
             raise Exception(f"IPFS fetch failed [{response.status_code}] for CID {cid}")
         return response.content
 
+    def check_health(self) -> dict:
+        """
+        Verifies Pinata connectivity and authentication without performing uploads.
+        """
+        if not PINATA_API_KEY or not PINATA_API_SECRET:
+            return {"configured": False, "authenticated": False, "message": "Credentials not set"}
+        try:
+            response = requests.get(
+                "https://api.pinata.cloud/data/testAuthentication",
+                headers={
+                    "pinata_api_key": PINATA_API_KEY,
+                    "pinata_secret_api_key": PINATA_API_SECRET,
+                },
+                timeout=5,
+            )
+            is_ok = response.status_code == 200
+            return {
+                "configured": True,
+                "authenticated": is_ok,
+                "status_code": response.status_code,
+                "message": "Connected" if is_ok else "Authentication failed",
+            }
+        except Exception as e:
+            return {
+                "configured": True,
+                "authenticated": False,
+                "message": f"Connection error: {str(e)}",
+            }
+
 
 ipfs_service = IPFSService()
