@@ -32,10 +32,13 @@ class MedicalRecord(Base):
     patient_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     doctor_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     file_type = Column(String, nullable=False) # e.g., 'Blood Test', 'Prescription'
-    supabase_file_path = Column(String, nullable=False) # Path in Supabase storage
-    ipfs_hash = Column(String, nullable=True) # Optional IPFS hash if used
+    supabase_file_path = Column(String, nullable=True) # Path in Supabase storage (nullable for IPFS-only records)
+    ipfs_hash = Column(String, nullable=True) # Kept for legacy compat
+    ipfs_cid = Column(String, nullable=True) # IPFS Content Identifier (CID) from Pinata
+    ipfs_file_name = Column(String, nullable=True) # Original file name
+    ipfs_file_size = Column(Integer, nullable=True) # File size in bytes
     blockchain_tx_hash = Column(String, nullable=True) # The tx hash where the record hash was stored
-    record_hash = Column(String, nullable=False) # SHA-256 hash of the encrypted file
+    record_hash = Column(String, nullable=True) # SHA-256 hash of the original file (pre-encrypt)
     description = Column(String, nullable=True) # Description of the medical record
     created_at = Column(DateTime, default=datetime.utcnow)
 

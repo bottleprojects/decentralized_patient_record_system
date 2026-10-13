@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
-import { ShieldCheck, ShieldAlert, FileText, Download, Loader2, User, FileHeart, Bell, Upload, X, Shield } from 'lucide-react';
+import { ShieldCheck, ShieldAlert, FileText, Download, Loader2, User, FileHeart, Bell, Upload, X, Shield, Globe } from 'lucide-react';
 import { fetchApi } from '../lib/api';
+
+const IPFS_MAX_MB = 50;
 
 interface Record {
   id: number;
@@ -9,6 +11,10 @@ interface Record {
   created_at: string;
   doctor_id: number;
   blockchain_tx_hash: string | null;
+  ipfs_cid: string | null;
+  ipfs_file_name: string | null;
+  ipfs_file_size: number | null;
+  record_hash: string | null;
 }
 
 interface Consent {
@@ -33,7 +39,11 @@ export default function PatientDashboard() {
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploadType, setUploadType] = useState('General Health Record');
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [useIPFS, setUseIPFS] = useState(true);
   const [downloadingRecordId, setDownloadingRecordId] = useState<number | null>(null);
+  const [integrityResults, setIntegrityResults] = useState<Record<number, boolean | null>>({});
   const [user, setUser] = useState<any>(null);
 
   useEffect(() => {
@@ -90,25 +100,79 @@ export default function PatientDashboard() {
   const handleUpload = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!uploadFile || !user) return;
+
+    // Client-side size validation
+    if (uploadFile.size > IPFS_MAX_MB * 1024 * 1024) {
+      setUploadError(`File is too large. Maximum size is ${IPFS_MAX_MB} MB.`);
+      return;
+    }
+    setUploadError(null);
     setUploading(true);
+    setUploadProgress(10);
+
     try {
       const formData = new FormData();
       formData.append('patient_id', user.id.toString());
       formData.append('file_type', uploadType);
       formData.append('file', uploadFile);
 
-      await fetchApi('/records', {
-        method: 'POST',
-        body: formData,
-      });
+      const endpoint = useIPFS ? '/records/ipfs-upload' : '/records';
+      setUploadProgress(40);
+
+      await fetchApi(endpoint, { method: 'POST', body: formData });
+
+      setUploadProgress(90);
       setIsUploadModalOpen(false);
       setUploadFile(null);
+      setUploadProgress(0);
       const recordsData = await fetchApi('/records');
       setRecords(recordsData);
     } catch (err: any) {
-      alert(err.message || "Failed to upload record");
+      setUploadError(err.message || 'Upload failed. Please try again.');
+      setUploadProgress(0);
     } finally {
       setUploading(false);
+    }
+  };
+
+  const handleIPFSDownload = async (record: any) => {
+    try {
+      setDownloadingRecordId(record.id);
+      setIntegrityResults(prev => ({ ...prev, [record.id]: null }));
+
+      const token = localStorage.getItem('access_token');
+      const apiUrl = import.meta.env.DEV ? 'http://localhost:8000' : 'https://backend-production-30645.up.railway.app';
+      const response = await fetch(`${apiUrl}/records/${record.id}/ipfs-download`, {
+        method: 'GET',
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || 'IPFS download failed');
+      }
+
+      // Read integrity header BEFORE consuming the body
+      const integrityVerified = response.headers.get('X-Integrity-Verified') === 'true';
+      setIntegrityResults(prev => ({ ...prev, [record.id]: integrityVerified }));
+
+      let filename = record.ipfs_file_name || `record_${record.id}`;
+      const disposition = response.headers.get('Content-Disposition');
+      if (disposition) {
+        const match = /filename="([^"]*)"/.exec(disposition);
+        if (match?.[1]) filename = match[1];
+      }
+
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = filename;
+      document.body.appendChild(a); a.click(); a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err: any) {
+      alert(err.message || 'Failed to download from IPFS');
+    } finally {
+      setDownloadingRecordId(null);
     }
   };
 
@@ -288,7 +352,7 @@ export default function PatientDashboard() {
                           <p className="text-xs text-slate-500 font-medium mt-1">
                             {record.doctor_id ? `Uploaded by Dr. ID: ${record.doctor_id}` : 'Uploaded by You'} • {record.created_at ? new Date(record.created_at).toLocaleDateString() : 'Unknown Date'}
                           </p>
-                          <div className="mt-2">
+                          <div className="mt-2 flex flex-wrap gap-1.5">
                             {record.blockchain_tx_hash ? (
                               <span className="badge badge-success gap-1">
                                 <ShieldCheck className="w-3 h-3" /> Blockchain Verified
@@ -298,11 +362,26 @@ export default function PatientDashboard() {
                                 <ShieldAlert className="w-3 h-3" /> Pending Verification
                               </span>
                             )}
+                            {record.ipfs_cid && (
+                              <span className="badge gap-1" style={{background:'#ede9fe',color:'#6d28d9',border:'1px solid #ddd6fe'}}>
+                                <Globe className="w-3 h-3" /> IPFS
+                              </span>
+                            )}
+                            {integrityResults[record.id] === true && (
+                              <span className="badge gap-1" style={{background:'#dcfce7',color:'#15803d',border:'1px solid #bbf7d0'}}>
+                                <ShieldCheck className="w-3 h-3" /> Integrity Verified ✓
+                              </span>
+                            )}
+                            {integrityResults[record.id] === false && (
+                              <span className="badge gap-1" style={{background:'#fee2e2',color:'#b91c1c',border:'1px solid #fecaca'}}>
+                                <ShieldAlert className="w-3 h-3" /> Integrity FAILED ✗
+                              </span>
+                            )}
                           </div>
                         </div>
                       </div>
                       <button 
-                        onClick={() => handleDownload(record.id)}
+                        onClick={() => record.ipfs_cid ? handleIPFSDownload(record) : handleDownload(record.id)}
                         disabled={downloadingRecordId === record.id}
                         className="btn-secondary w-full sm:w-auto text-sm px-3 py-1.5 flex justify-center items-center gap-1.5"
                       >
@@ -311,7 +390,7 @@ export default function PatientDashboard() {
                         ) : (
                           <Download className="w-4 h-4" />
                         )}
-                        Download
+                        {record.ipfs_cid ? 'Download (IPFS)' : 'Download'}
                       </button>
                     </div>
                   ))}
@@ -392,11 +471,28 @@ export default function PatientDashboard() {
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
             <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
               <h3 className="text-lg font-bold text-slate-800">Upload Medical Record</h3>
-              <button onClick={() => setIsUploadModalOpen(false)} className="text-slate-400 hover:text-slate-600 p-1 rounded-md hover:bg-slate-100">
+              <button onClick={() => { setIsUploadModalOpen(false); setUploadError(null); setUploadProgress(0); }} className="text-slate-400 hover:text-slate-600 p-1 rounded-md hover:bg-slate-100">
                 <X className="w-5 h-5" />
               </button>
             </div>
             <form onSubmit={handleUpload} className="p-6 space-y-4">
+
+              {/* Storage toggle */}
+              <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-lg border border-slate-200">
+                <Globe className="w-4 h-4 text-violet-600 shrink-0" />
+                <div className="flex-1">
+                  <p className="text-xs font-semibold text-slate-700">Upload to IPFS (Pinata)</p>
+                  <p className="text-xs text-slate-500">Encrypted on-chain reference only</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setUseIPFS(v => !v)}
+                  className={`relative w-10 h-5 rounded-full transition-colors ${ useIPFS ? 'bg-violet-600' : 'bg-slate-300'}`}
+                >
+                  <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${useIPFS ? 'translate-x-5' : ''}`} />
+                </button>
+              </div>
+
               <div>
                 <label className="block text-sm font-semibold text-slate-700 mb-1.5">Document Type</label>
                 <select value={uploadType} onChange={(e) => setUploadType(e.target.value)} className="input-field">
@@ -407,15 +503,66 @@ export default function PatientDashboard() {
                   <option value="Clinical Notes">Clinical Notes</option>
                 </select>
               </div>
+
               <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-1.5">File</label>
+                <label className="block text-sm font-semibold text-slate-700 mb-1.5">
+                  File <span className="text-slate-400 font-normal">(max {IPFS_MAX_MB} MB)</span>
+                </label>
                 <div className="border border-slate-200 rounded-lg p-1">
-                  <input type="file" required onChange={(e) => setUploadFile(e.target.files?.[0] || null)} className="w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-slate-100 file:text-slate-700 hover:file:bg-slate-200 transition-all cursor-pointer" />
+                  <input
+                    type="file"
+                    required
+                    onChange={(e) => {
+                      const f = e.target.files?.[0] || null;
+                      setUploadFile(f);
+                      setUploadError(null);
+                      if (f && f.size > IPFS_MAX_MB * 1024 * 1024) {
+                        setUploadError(`File exceeds ${IPFS_MAX_MB} MB limit (${(f.size / (1024 * 1024)).toFixed(1)} MB).`);
+                      }
+                    }}
+                    className="w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-slate-100 file:text-slate-700 hover:file:bg-slate-200 transition-all cursor-pointer"
+                  />
                 </div>
+                {uploadFile && !uploadError && (
+                  <p className="text-xs text-slate-500 mt-1">{uploadFile.name} — {(uploadFile.size / 1024).toFixed(1)} KB</p>
+                )}
               </div>
+
+              {/* Error message */}
+              {uploadError && (
+                <div className="flex items-start gap-2 p-3 bg-red-50 border border-red-200 rounded-lg">
+                  <ShieldAlert className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
+                  <p className="text-xs text-red-700">{uploadError}</p>
+                </div>
+              )}
+
+              {/* Progress bar */}
+              {uploading && uploadProgress > 0 && (
+                <div className="space-y-1">
+                  <div className="flex justify-between text-xs text-slate-500">
+                    <span>{uploadProgress < 40 ? 'Encrypting…' : uploadProgress < 90 ? 'Uploading to IPFS…' : 'Anchoring on blockchain…'}</span>
+                    <span>{uploadProgress}%</span>
+                  </div>
+                  <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-violet-500 rounded-full transition-all duration-500"
+                      style={{ width: `${uploadProgress}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+
               <div className="pt-2">
-                <button type="submit" disabled={uploading || !uploadFile} className="w-full btn-primary py-2.5">
-                  {uploading ? 'Encrypting & Uploading...' : 'Secure Upload'}
+                <button
+                  type="submit"
+                  disabled={uploading || !uploadFile || !!uploadError}
+                  className="w-full btn-primary py-2.5 flex items-center justify-center gap-2"
+                >
+                  {uploading ? (
+                    <><Loader2 className="w-4 h-4 animate-spin" /> {useIPFS ? 'Encrypting & Pinning to IPFS…' : 'Encrypting & Uploading…'}</>
+                  ) : (
+                    <><Upload className="w-4 h-4" /> {useIPFS ? 'Secure Upload to IPFS' : 'Secure Upload'}</>
+                  )}
                 </button>
               </div>
             </form>
