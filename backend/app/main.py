@@ -86,15 +86,11 @@ from contextlib import asynccontextmanager
 async def keep_alive_task():
     while True:
         try:
-            # Check Neon
+            # Check Database
             from sqlalchemy import text
             from .database import SessionLocal
             with SessionLocal() as db:
                 db.execute(text("SELECT 1"))
-            
-            # Check Supabase
-            from .services.storage import storage_service
-            storage_service.client.storage.get_bucket("medical-documents")
             
             print("Keep-alive ping successful")
         except Exception as e:
@@ -129,7 +125,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["Content-Disposition"],
+    expose_headers=["Content-Disposition", "X-Integrity-Verified", "X-IPFS-CID", "X-Record-Hash"],
 )
 
 app.include_router(users.router)
@@ -145,32 +141,29 @@ from .database import get_db
 
 @app.get("/health")
 def health_check():
-    status_neon = False
-    status_supabase = False
+    status_db = False
+    status_ipfs = False
     
-    # Check Neon
+    # Check Database
     try:
         from sqlalchemy import text
         from .database import SessionLocal
         with SessionLocal() as db:
             db.execute(text("SELECT 1"))
-            status_neon = True
+            status_db = True
     except Exception:
         pass
         
-    # Check Supabase
-    try:
-        from .services.storage import storage_service
-        # Checking the bucket is a good way to see if the project is awake
-        storage_service.client.storage.get_bucket("medical-documents")
-        status_supabase = True
-    except Exception:
-        pass
+    # Check IPFS / Pinata configuration
+    pinata_key = os.getenv("PINATA_API_KEY")
+    pinata_secret = os.getenv("PINATA_API_SECRET")
+    if pinata_key and pinata_secret and "your" not in pinata_key.lower():
+        status_ipfs = True
 
     return {
-        "status": "ok" if status_neon and status_supabase else "error",
-        "neon_active": status_neon,
-        "supabase_active": status_supabase
+        "status": "ok" if status_db else "error",
+        "database_active": status_db,
+        "ipfs_active": status_ipfs
     }
 
 # Mount the frontend dist folder if it exists

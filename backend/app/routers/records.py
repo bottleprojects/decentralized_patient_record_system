@@ -9,7 +9,6 @@ from ..database import get_db
 from ..models import User, MedicalRecord, Consent, RoleEnum, AuditLog
 from ..services.auth import get_current_user
 from ..services.crypto import crypto_service
-from ..services.storage import storage_service
 from ..services.blockchain import blockchain_service
 from ..services.ipfs import ipfs_service
 
@@ -19,6 +18,7 @@ IPFS_MAX_SIZE_BYTES = 50 * 1024 * 1024
 router = APIRouter(prefix="/records", tags=["records"])
 
 @router.post("", status_code=status.HTTP_201_CREATED)
+@router.post("/ipfs-upload", status_code=status.HTTP_201_CREATED)
 async def upload_record(
     patient_id: int = Form(...),
     file_type: str = Form(...),
@@ -27,6 +27,11 @@ async def upload_record(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
+    """
+    IPFS Upload flow: Frontend -> Backend -> AES-256-GCM Encrypt -> Pinata IPFS -> Sepolia Blockchain anchoring.
+    Only the CID, SHA-256 hash, and file metadata are anchored on-chain.
+    """
+    # Permission check
     if current_user.role == RoleEnum.patient:
         if patient_id != current_user.id:
             raise HTTPException(status_code=403, detail="Patients can only upload their own records")
@@ -41,85 +46,6 @@ async def upload_record(
             Consent.status == "active"
         ).first()
 
-        if not consent:
-            raise HTTPException(status_code=403, detail="No active consent from this patient")
-        assigned_doctor_id = current_user.id
-    else:
-        raise HTTPException(status_code=403, detail="Admins cannot upload records")
-
-    # Read and hash original file
-    file_bytes = await file.read()
-    original_hash = hashlib.sha256(file_bytes).hexdigest()
-
-    # Encrypt file
-    encrypted_bytes = crypto_service.encrypt(file_bytes)
-    
-    # Upload to Supabase
-    file_name = f"{patient_id}/{uuid.uuid4()}_{file.filename}.enc"
-    storage_path = storage_service.upload_file(file_name, encrypted_bytes, file.content_type or "application/octet-stream")
-
-    # Store hash on Blockchain
-    record_uuid = str(uuid.uuid4())
-    tx_hash = None
-    try:
-        # Require blockchain verification 
-        tx_hash = blockchain_service.store_record_hash(record_uuid, original_hash)
-    except Exception as e:
-        # Delete the uploaded file from Supabase if blockchain fails so we don't leave orphaned files
-        try:
-            storage_service.client.storage.from_(storage_service.bucket_name).remove([file_name])
-        except Exception:
-            pass
-        raise HTTPException(status_code=500, detail=f"Blockchain verification failed: {str(e)}")
-
-    # Save to Database
-    record = MedicalRecord(
-        patient_id=patient_id,
-        doctor_id=assigned_doctor_id,
-        file_type=file_type,
-        supabase_file_path=storage_path,
-        record_hash=original_hash,
-        blockchain_tx_hash=tx_hash,
-        description=description
-    )
-    db.add(record)
-    
-    # Audit log
-    audit = AuditLog(user_id=current_user.id, action="UPLOAD_RECORD", resource_id=str(patient_id))
-    db.add(audit)
-    
-    db.commit()
-    db.refresh(record)
-
-    return {"message": "Record uploaded and encrypted successfully", "record_id": record.id, "tx_hash": tx_hash}
-
-
-@router.post("/ipfs-upload", status_code=status.HTTP_201_CREATED)
-async def upload_record_ipfs(
-    patient_id: int = Form(...),
-    file_type: str = Form(...),
-    description: str = Form(None),
-    file: UploadFile = File(...),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    """
-    Upload flow: Frontend → Backend → IPFS (Pinata).
-    Stores only CID + SHA-256 hash + metadata on-chain. File never touches the blockchain.
-    """
-    # Permission check (same rules as regular upload)
-    if current_user.role == RoleEnum.patient:
-        if patient_id != current_user.id:
-            raise HTTPException(status_code=403, detail="Patients can only upload their own records")
-        assigned_doctor_id = None
-    elif current_user.role == RoleEnum.doctor:
-        if current_user.verification_status != "verified":
-            raise HTTPException(status_code=403, detail="Your doctor account must be verified by an admin before uploading records")
-        consent = db.query(Consent).filter(
-            Consent.patient_id == patient_id,
-            Consent.doctor_id == current_user.id,
-            Consent.status == "active"
-        ).first()
         if not consent:
             raise HTTPException(status_code=403, detail="No active consent from this patient")
         assigned_doctor_id = current_user.id
@@ -170,7 +96,7 @@ async def upload_record_ipfs(
         patient_id=patient_id,
         doctor_id=assigned_doctor_id,
         file_type=file_type,
-        supabase_file_path=None,      # Not using Supabase for this upload
+        supabase_file_path=None,
         ipfs_cid=cid,
         ipfs_file_name=original_filename,
         ipfs_file_size=len(file_bytes),
@@ -193,6 +119,7 @@ async def upload_record_ipfs(
         "file_size": len(file_bytes),
         "file_name": original_filename,
     }
+
 
 @router.get("")
 def get_records(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
@@ -308,62 +235,8 @@ def export_patient_records(db: Session = Depends(get_db), current_user: User = D
     }
 
 @router.get("/{record_id}/download")
-def download_record(record_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    # 1. Get record
-    record = db.query(MedicalRecord).filter(MedicalRecord.id == record_id).first()
-    if not record:
-        raise HTTPException(status_code=404, detail="Record not found")
-        
-    # 2. Check permissions
-    if current_user.role == RoleEnum.patient:
-        if record.patient_id != current_user.id:
-            raise HTTPException(status_code=403, detail="Not authorized to access this record")
-    elif current_user.role == RoleEnum.doctor:
-        consent = db.query(Consent).filter(
-            Consent.patient_id == record.patient_id,
-            Consent.doctor_id == current_user.id,
-            Consent.status == "active"
-        ).first()
-        if not consent:
-            raise HTTPException(status_code=403, detail="No active consent from this patient")
-    else:
-        raise HTTPException(status_code=403, detail="Admins cannot download records")
-        
-    # 3. Download from Supabase
-    try:
-        encrypted_bytes = storage_service.download_file(record.supabase_file_path)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to retrieve file from storage: {e}")
-        
-    # 4. Decrypt
-    try:
-        decrypted_bytes = crypto_service.decrypt(encrypted_bytes)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail="Failed to decrypt file")
-        
-    # Extract original filename from supabase_file_path if possible
-    # format is: patient_id/uuid_filename.ext.enc
-    file_name = record.supabase_file_path.split("/")[-1]
-    if file_name.endswith(".enc"):
-        file_name = file_name[:-4] # strip .enc
-    # also strip uuid_ (36 chars + 1 underscore)
-    if len(file_name) > 37 and file_name[36] == "_":
-        file_name = file_name[37:]
-        
-    headers = {
-        'Content-Disposition': f'attachment; filename="{file_name}"'
-    }
-    
-    # log audit
-    audit = AuditLog(user_id=current_user.id, action="DOWNLOAD_RECORD", resource_id=str(record.id))
-    db.add(audit)
-    db.commit()
-    
-    return Response(content=decrypted_bytes, headers=headers)
-
-
 @router.get("/{record_id}/ipfs-download")
-def download_record_ipfs(record_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def download_record(record_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """
     Download flow: IPFS (via Pinata gateway) → Backend → decrypt → verify hash → Frontend.
     Returns the decrypted file with an 'X-Integrity-Verified' header.
@@ -373,9 +246,12 @@ def download_record_ipfs(record_id: int, db: Session = Depends(get_db), current_
     if not record:
         raise HTTPException(status_code=404, detail="Record not found")
     if not record.ipfs_cid:
-        raise HTTPException(status_code=400, detail="This record is not stored on IPFS. Use the regular download endpoint.")
+        raise HTTPException(
+            status_code=400,
+            detail="This record was uploaded under legacy storage and has no IPFS CID. Please re-upload to IPFS."
+        )
 
-    # 2. Permission check (same as regular download)
+    # 2. Permission check
     if current_user.role == RoleEnum.patient:
         if record.patient_id != current_user.id:
             raise HTTPException(status_code=403, detail="Not authorized to access this record")
@@ -414,7 +290,6 @@ def download_record_ipfs(record_id: int, db: Session = Depends(get_db), current_
         "X-Record-Hash": record.record_hash or "",
         "X-Recomputed-Hash": recomputed_hash,
         "X-IPFS-CID": record.ipfs_cid,
-        # Expose custom headers to the browser
         "Access-Control-Expose-Headers": "X-Integrity-Verified, X-Record-Hash, X-Recomputed-Hash, X-IPFS-CID, Content-Disposition",
     }
 
