@@ -1,6 +1,5 @@
-# pyrefly: ignore [missing-import]
+import os
 from fastapi import APIRouter, Depends, HTTPException, status, Request
-# pyrefly: ignore [missing-import]
 from sqlalchemy.orm import Session
 from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel, EmailStr
@@ -9,6 +8,7 @@ from typing import Optional
 from ..database import get_db
 from ..models import User, RoleEnum
 from ..services.auth import get_password_hash, verify_password, create_access_token, get_current_user
+from ..services.rate_limiter import rate_limiter, get_client_ip
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -24,7 +24,10 @@ class Token(BaseModel):
     token_type: str
 
 @router.post("/register", status_code=status.HTTP_201_CREATED)
-def register(user: UserCreate, db: Session = Depends(get_db)):
+def register(user: UserCreate, request: Request, db: Session = Depends(get_db)):
+    client_ip = get_client_ip(request)
+    rate_limiter.check(f"register:{client_ip}", max_requests=5, window_seconds=60, action_name="registration")
+
     db_user = db.query(User).filter(User.email == user.email).first()
     if db_user:
         raise HTTPException(status_code=400, detail="Email already registered")
@@ -57,6 +60,9 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
 
 @router.post("/login")
 async def login(request: Request, db: Session = Depends(get_db)):
+    client_ip = get_client_ip(request)
+    rate_limiter.check(f"login:{client_ip}", max_requests=10, window_seconds=60, action_name="login")
+
     # The deployed frontend has a bug where it sends url-encoded data but sets Content-Type to application/json
     # We must manually parse the body as a string and extract the fields
     body_bytes = await request.body()
@@ -162,6 +168,13 @@ def verify_doctor(user_id: int, status: str = "verified", db: Session = Depends(
 
 @router.delete("/admin/cleanup")
 def cleanup_database(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    env = os.getenv("ENVIRONMENT", "development").lower()
+    if env == "production":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Database cleanup is permanently disabled in the production environment."
+        )
+
     if current_user.role != RoleEnum.admin:
         raise HTTPException(status_code=403, detail="Not authorized. Admins only.")
     
@@ -181,6 +194,18 @@ def cleanup_database(db: Session = Depends(get_db), current_user: User = Depends
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Failed to clean database: {str(e)}")
+
+@router.post("/reset-demo")
+@router.delete("/reset-demo")
+def reset_demo(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Reset demo endpoint - permanently disabled in production, admin only in dev."""
+    env = os.getenv("ENVIRONMENT", "development").lower()
+    if env == "production":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Reset demo endpoint is disabled in production."
+        )
+    return cleanup_database(db=db, current_user=current_user)
 
 @router.delete("/{user_id}")
 def delete_user(user_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):

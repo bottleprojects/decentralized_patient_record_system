@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Response
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Response, Request
 from sqlalchemy.orm import Session
 from typing import List
 import hashlib
@@ -11,15 +11,19 @@ from ..services.auth import get_current_user
 from ..services.crypto import crypto_service
 from ..services.blockchain import blockchain_service
 from ..services.ipfs import ipfs_service
+from ..services.rate_limiter import rate_limiter, get_client_ip
 
 # File size limit for IPFS uploads: 50 MB
 IPFS_MAX_SIZE_BYTES = 50 * 1024 * 1024
+# Per-patient lifetime record cap for demo deployment
+MAX_RECORDS_PER_PATIENT = 25
 
 router = APIRouter(prefix="/records", tags=["records"])
 
 @router.post("", status_code=status.HTTP_201_CREATED)
 @router.post("/ipfs-upload", status_code=status.HTTP_201_CREATED)
 async def upload_record(
+    request: Request,
     patient_id: int = Form(...),
     file_type: str = Form(...),
     description: str = Form(None),
@@ -31,6 +35,14 @@ async def upload_record(
     IPFS Upload flow: Frontend -> Backend -> AES-256-GCM Encrypt -> Pinata IPFS -> Sepolia Blockchain anchoring.
     Only the CID, SHA-256 hash, and file metadata are anchored on-chain.
     """
+    # Rate limit uploads: 10 uploads per hour per user
+    rate_limiter.check(
+        f"upload:user:{current_user.id}",
+        max_requests=10,
+        window_seconds=3600,
+        action_name="medical record upload"
+    )
+
     # Permission check
     if current_user.role == RoleEnum.patient:
         if patient_id != current_user.id:
@@ -51,6 +63,14 @@ async def upload_record(
         assigned_doctor_id = current_user.id
     else:
         raise HTTPException(status_code=403, detail="Admins cannot upload records")
+
+    # Enforce per-user upload cap
+    patient_record_count = db.query(MedicalRecord).filter(MedicalRecord.patient_id == patient_id).count()
+    if patient_record_count >= MAX_RECORDS_PER_PATIENT:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Patient upload cap reached: maximum {MAX_RECORDS_PER_PATIENT} records allowed per patient in this demo."
+        )
 
     # Read file
     file_bytes = await file.read()

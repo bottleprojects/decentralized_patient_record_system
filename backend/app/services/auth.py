@@ -10,7 +10,19 @@ from ..database import get_db
 from ..models import User
 
 # Configuration
-SECRET_KEY = os.getenv("JWT_SECRET_KEY", "09d25e094faa6ca2556c818166b7a9563b93f7099f6f0f4caa6cf63b88e8d3e7") # Fallback for dev only
+ENVIRONMENT = os.getenv("ENVIRONMENT", "development").lower()
+SECRET_KEY = os.getenv("JWT_SECRET_KEY")
+
+if ENVIRONMENT == "production":
+    if not SECRET_KEY or len(SECRET_KEY.strip()) < 16:
+        raise RuntimeError(
+            "FATAL [Auth]: In production, JWT_SECRET_KEY must be configured via environment variable "
+            "with a secure key (at least 16 characters). No default secret key is permitted."
+        )
+else:
+    if not SECRET_KEY:
+        SECRET_KEY = "dev-insecure-jwt-secret-key-change-in-production"
+
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 # 1 day
 
