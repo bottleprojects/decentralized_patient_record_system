@@ -42,6 +42,42 @@ This guide provides click-by-click instructions to deploy the DPRMS full-stack a
 
 ---
 
+## Step 0: Deploy Smart Contract to Sepolia (If Starting from Scratch)
+
+If you are setting up a fresh deployment or deploying a new smart contract instance:
+
+1. Navigate to the `blockchain/` directory:
+   ```bash
+   cd blockchain
+   npm install
+   ```
+2. Ensure `blockchain/.env` contains your funded Sepolia wallet private key and RPC URL:
+   ```env
+   SEPOLIA_RPC_URL=https://eth-sepolia.g.alchemy.com/v2/YOUR_ALCHEMY_KEY
+   PRIVATE_KEY=your_throwaway_wallet_private_key_hex
+   ```
+   *(Note: The wallet must have a small amount of Sepolia ETH from a faucet, e.g. https://sepoliafaucet.com or Alchemy Faucet).*
+
+3. Compile the Solidity contract:
+   ```bash
+   npx hardhat compile
+   ```
+4. Deploy the contract to Sepolia:
+   ```bash
+   npx hardhat run scripts/deploy.js --network sepolia
+   ```
+5. Note the deployment output. It will display:
+   ```
+   Deploying PatientRecord contract to sepolia...
+   Deployer address: 0x541509676ad712d4C4FBbe8638F710567D87998F
+   Deployment transaction hash: 0x41de643c63fef9c966a1782bb42959c1a8c0c5be1842fd572d759c2852b0e8b8
+   PatientRecord deployed to: 0xabaE36eaC3367310a393bdE2fe26690C65bB5f02
+   Verify on Etherscan: https://sepolia.etherscan.io/address/0xabaE36eaC3367310a393bdE2fe26690C65bB5f02
+   ```
+6. Copy the deployed contract address and set it as `CONTRACT_ADDRESS` in your backend configuration.
+
+---
+
 ## Step 1: Provision Hosted PostgreSQL Database
 
 You can use **Neon.tech** (recommended for serverless Postgres with pooling) or **Render PostgreSQL**.
@@ -92,7 +128,10 @@ You can use **Neon.tech** (recommended for serverless Postgres with pooling) or 
    `https://dprms-backend.onrender.com`
 10. Test health by opening: `https://dprms-backend.onrender.com/health` in your browser. Both database and Pinata should report connected.
 
-> **Helper Commands to Generate Secrets Locally (Run in Terminal):**
+> **Helper Commands to Generate Production Secrets (Run in Terminal):**
+>
+> *Security Note: `JWT_SECRET_KEY` and `ENCRYPTION_KEY` in production MUST be freshly generated and never reused across environments. Ensure `ENCRYPTION_KEY` is securely backed up; if this key is changed or lost, all previously encrypted files pinned to IPFS cannot be decrypted.*
+>
 > ```bash
 > # Generate JWT_SECRET_KEY (32-byte hex)
 > python3 -c "import secrets; print(secrets.token_hex(32))"
@@ -100,6 +139,7 @@ You can use **Neon.tech** (recommended for serverless Postgres with pooling) or 
 > # Generate ENCRYPTION_KEY (32-byte base64)
 > python3 -c "import os,base64; print(base64.b64encode(os.urandom(32)).decode())"
 > ```
+
 
 ---
 
