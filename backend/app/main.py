@@ -25,6 +25,7 @@ with engine.connect() as conn:
             "ALTER TABLE medical_records ADD COLUMN IF NOT EXISTS ipfs_cid VARCHAR",
             "ALTER TABLE medical_records ADD COLUMN IF NOT EXISTS ipfs_file_name VARCHAR",
             "ALTER TABLE medical_records ADD COLUMN IF NOT EXISTS ipfs_file_size INTEGER",
+            "ALTER TABLE medical_records ADD COLUMN IF NOT EXISTS blockchain_status VARCHAR DEFAULT 'confirmed'",
             "ALTER TABLE medical_records ALTER COLUMN supabase_file_path DROP NOT NULL",
             "ALTER TABLE medical_records ALTER COLUMN record_hash DROP NOT NULL",
             "DELETE FROM medical_records WHERE blockchain_tx_hash IS NULL OR blockchain_tx_hash = '' OR created_at IS NULL OR file_type IS NULL OR file_type = ''",
@@ -45,6 +46,7 @@ with engine.connect() as conn:
             "ALTER TABLE medical_records ADD COLUMN ipfs_cid VARCHAR",
             "ALTER TABLE medical_records ADD COLUMN ipfs_file_name VARCHAR",
             "ALTER TABLE medical_records ADD COLUMN ipfs_file_size INTEGER",
+            "ALTER TABLE medical_records ADD COLUMN blockchain_status VARCHAR DEFAULT 'confirmed'",
             "DELETE FROM medical_records WHERE blockchain_tx_hash IS NULL OR blockchain_tx_hash = '' OR created_at IS NULL OR file_type IS NULL OR file_type = ''",
         ]
         for stmt in sqlite_migrations:
@@ -210,9 +212,17 @@ if os.path.exists(frontend_dist):
     
     @app.get("/{catchall:path}")
     def serve_frontend(catchall: str):
-        if catchall and os.path.exists(os.path.join(frontend_dist, catchall)):
-            return FileResponse(os.path.join(frontend_dist, catchall))
-        return FileResponse(os.path.join(frontend_dist, "index.html"))
+        file_path = os.path.join(frontend_dist, catchall)
+        if catchall and os.path.isfile(file_path):
+            return FileResponse(file_path)
+        # If requesting a specific file/asset with an extension that does not exist, return 404
+        if "." in os.path.basename(catchall):
+            return JSONResponse(status_code=404, content={"detail": f"Asset '{catchall}' not found"})
+        # Otherwise serve SPA entry point index.html
+        index_file = os.path.join(frontend_dist, "index.html")
+        if os.path.isfile(index_file):
+            return FileResponse(index_file)
+        return JSONResponse(status_code=404, content={"detail": "Frontend index.html not found"})
 else:
     @app.get("/")
     def read_root():
