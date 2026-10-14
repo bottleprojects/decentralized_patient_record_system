@@ -107,3 +107,11 @@ class Observation(Base):
     value = Column(String, nullable=False)
     unit = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+class BlockchainTransactionCounter(Base):
+    __tablename__ = "blockchain_tx_counters"
+
+    id = Column(Integer, primary_key=True, index=True)
+    date_str = Column(String, unique=True, index=True, nullable=False) # "YYYY-MM-DD"
+    tx_count = Column(Integer, default=0, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow)

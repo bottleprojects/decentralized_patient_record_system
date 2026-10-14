@@ -27,8 +27,6 @@ else:
 class BlockchainService:
     def __init__(self):
         self.simulate_blockchain = SIMULATE_BLOCKCHAIN
-        self._daily_date = datetime.utcnow().date()
-        self._daily_tx_count = 0
         self.max_daily_tx = int(os.getenv("MAX_DAILY_TRANSACTIONS", "50"))
 
         is_placeholder = any(p in str(x).lower() for x in [RPC_URL, PRIVATE_KEY, CONTRACT_ADDRESS] for p in ["your", "placeholder"])
@@ -54,19 +52,47 @@ class BlockchainService:
         self.account = self.w3.eth.account.from_key(PRIVATE_KEY)
         self.contract = self.w3.eth.contract(address=self.w3.to_checksum_address(CONTRACT_ADDRESS), abi=CONTRACT_ABI)
 
+    def _check_and_increment_daily_tx(self) -> int:
+        """Enforces and records daily transaction count in the database to survive restarts."""
+        from ..database import SessionLocal, engine, Base
+        from ..models import BlockchainTransactionCounter
+
+        Base.metadata.create_all(bind=engine)
+        today_str = datetime.utcnow().strftime("%Y-%m-%d")
+        with SessionLocal() as db:
+            counter = db.query(BlockchainTransactionCounter).filter(BlockchainTransactionCounter.date_str == today_str).first()
+            if not counter:
+                counter = BlockchainTransactionCounter(date_str=today_str, tx_count=0)
+                db.add(counter)
+                db.commit()
+                db.refresh(counter)
+
+            if counter.tx_count >= self.max_daily_tx:
+                raise RuntimeError(
+                    f"Daily blockchain anchoring limit ({self.max_daily_tx} transactions) reached for {today_str}. "
+                    "Transactions paused to protect the Sepolia faucet wallet from gas drainage."
+                )
+
+            counter.tx_count += 1
+            counter.updated_at = datetime.utcnow()
+            db.commit()
+            return counter.tx_count
+
+    def get_daily_tx_count(self) -> int:
+        """Returns the number of blockchain transactions anchored today."""
+        from ..database import SessionLocal, engine, Base
+        from ..models import BlockchainTransactionCounter
+
+        Base.metadata.create_all(bind=engine)
+        today_str = datetime.utcnow().strftime("%Y-%m-%d")
+        with SessionLocal() as db:
+            counter = db.query(BlockchainTransactionCounter).filter(BlockchainTransactionCounter.date_str == today_str).first()
+            return counter.tx_count if counter else 0
+
     def _send_tx(self, fn_call) -> str:
         """Helper: check limits and balance, build, sign, and send a transaction. Returns tx hash hex."""
-        # 1. Enforce daily transaction limit to prevent drain of faucet wallet
-        today = datetime.utcnow().date()
-        if self._daily_date != today:
-            self._daily_date = today
-            self._daily_tx_count = 0
-
-        if self._daily_tx_count >= self.max_daily_tx:
-            raise RuntimeError(
-                f"Daily blockchain anchoring limit ({self.max_daily_tx} transactions) reached for today. "
-                "Transactions paused to protect the Sepolia faucet wallet from gas drainage."
-            )
+        # 1. Enforce database-backed daily transaction limit
+        self._check_and_increment_daily_tx()
 
         # 2. Check wallet balance before broadcasting
         balance_wei = self.w3.eth.get_balance(self.account.address)
@@ -84,8 +110,6 @@ class BlockchainService:
         signed = self.w3.eth.account.sign_transaction(tx, private_key=PRIVATE_KEY)
         tx_hash = self.w3.eth.send_raw_transaction(signed.raw_transaction)
 
-        # Increment daily counter
-        self._daily_tx_count += 1
         return self.w3.to_hex(tx_hash)
 
     def store_record_hash(self, record_id: str, record_hash: str) -> str:
