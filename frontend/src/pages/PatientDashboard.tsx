@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ShieldCheck, ShieldAlert, FileText, Download, Loader2, User, FileHeart, Bell, Upload, X, Shield, Globe } from 'lucide-react';
+import { ShieldCheck, ShieldAlert, FileText, Download, Loader2, User, FileHeart, Bell, Upload, X, Shield, Globe, ExternalLink } from 'lucide-react';
 import { fetchApi, API_URL } from '../lib/api';
 
 const IPFS_MAX_MB = 50;
@@ -311,9 +311,16 @@ export default function PatientDashboard() {
                           </p>
                           <div className="mt-2 flex flex-wrap gap-1.5">
                             {record.blockchain_tx_hash ? (
-                              <span className="badge badge-success gap-1">
+                              <a
+                                href={`https://sepolia.etherscan.io/tx/${record.blockchain_tx_hash}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="badge badge-success gap-1 hover:underline cursor-pointer inline-flex items-center"
+                                title={`View Sepolia transaction: ${record.blockchain_tx_hash}`}
+                              >
                                 <ShieldCheck className="w-3 h-3" /> Blockchain Verified
-                              </span>
+                                <ExternalLink className="w-2.5 h-2.5 ml-0.5 opacity-70" />
+                              </a>
                             ) : (
                               <span className="badge badge-warning gap-1">
                                 <ShieldAlert className="w-3 h-3" /> Pending Verification

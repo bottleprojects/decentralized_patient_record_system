@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, CheckCircle2, Loader2, Clock, FileDown, FileText } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, Loader2, Clock, FileDown, FileText, ExternalLink } from 'lucide-react';
 import { fetchApi, API_URL } from '../lib/api';
 
 interface Record {
@@ -162,9 +162,16 @@ export default function DoctorPatientView() {
                   <td className="py-4 px-6">
                     <div className="flex flex-wrap items-center gap-1.5">
                       {record.blockchain_tx_hash ? (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                        <a
+                          href={`https://sepolia.etherscan.io/tx/${record.blockchain_tx_hash}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 hover:underline cursor-pointer"
+                          title={`View Sepolia transaction: ${record.blockchain_tx_hash}`}
+                        >
                           <CheckCircle2 className="w-3.5 h-3.5" /> Verified
-                        </span>
+                          <ExternalLink className="w-2.5 h-2.5 ml-0.5 opacity-70" />
+                        </a>
                       ) : (
                         <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200">
                           <Loader2 className="w-3.5 h-3.5 animate-spin" /> Pending
