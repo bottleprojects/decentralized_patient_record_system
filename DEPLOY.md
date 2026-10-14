@@ -33,6 +33,7 @@ This guide provides click-by-click instructions to deploy the DPRMS full-stack a
 | `ADMIN_EMAIL` | (Optional) Automated administrator email bootstrap (e.g. `admin@yourdomain.com`). |
 | `ADMIN_PASSWORD` | (Optional) Strong password for the administrator account to access `/admin`. |
 | `MAX_DAILY_TRANSACTIONS` | (Optional) Cap on daily on-chain anchoring transactions (default: `50`). |
+| `MAX_UPLOAD_MB` | (Optional) Max upload file size in MB (default: `10`). Protects container RAM. |
 
 
 ### Frontend (Vercel or Render Static Site)
@@ -101,15 +102,16 @@ You can use **Neon.tech** (recommended for serverless Postgres with connection p
 1. Log in to [https://render.com](https://render.com).
 2. Click **New +** in the top navigation and select **Web Service**.
 3. Connect your GitHub repository (`decentralized_patient_record_system`).
-4. Select the branch: `feature/ipfs-storage` (or `main` if merged).
+4. Select the branch: `main`.
 5. Fill in the service configuration details:
    - **Name**: `dprms-backend`
    - **Region**: **Singapore** *(matches your Neon database AWS ap-southeast-1 region)*
    - **Root Directory**: `backend`
    - **Runtime**: `Python 3`
    - **Build Command**: `pip install -r requirements.txt`
-   - **Start Command**: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
+   - **Start Command**: `uvicorn app.main:app --host 0.0.0.0 --port $PORT --proxy-headers --forwarded-allow-ips='*'`
    - **Instance Type**: `Free`
+   *(Note: `--proxy-headers --forwarded-allow-ips='*'` ensures uvicorn parses `X-Forwarded-For` from Render's reverse proxy so client IP rate limiting works per-user instead of grouping all traffic under the proxy IP).*
 6. Click **Advanced** and set:
    - **Health Check Path**: `/health`
    - **Auto-Deploy**: `Yes`
@@ -127,7 +129,15 @@ You can use **Neon.tech** (recommended for serverless Postgres with connection p
    - `PINATA_API_SECRET`: *(Your Pinata API Secret)*
    - `PINATA_GATEWAY`: `https://gateway.pinata.cloud`
    - `MAX_DAILY_TRANSACTIONS`: `50`
+   - `MAX_UPLOAD_MB`: `10`
    - `FRONTEND_URL`: *(Temporarily enter `http://localhost:5173` or your planned Vercel URL, then update in Step 4)*
+
+> **Memory Footprint & Upload Sizing Note:**
+> Each upload uses approximately **3x to 3.5x the file size in container RAM**:
+> 1. `file.read()` original raw bytes in RAM (1x)
+> 2. AES-256-GCM encrypted ciphertext buffer in RAM (1x)
+> 3. Pinata multipart HTTP request payload buffer (~1-1.5x)
+> Setting `MAX_UPLOAD_MB=10` caps peak memory usage to ~35 MB per upload, comfortably within Render's free tier memory ceiling (512 MB).
 8. Click **Deploy Web Service**.
 9. Wait 2-3 minutes for Render to build and start the service. Once deployed, note your backend public URL:
    `https://dprms-backend.onrender.com`
@@ -159,15 +169,16 @@ You can deploy the Vite React frontend on **Vercel** (recommended) or as a **Ren
 1. Log in to [https://vercel.com](https://vercel.com).
 2. Click **Add New...** → **Project**.
 3. Import your GitHub repository (`decentralized_patient_record_system`).
-4. Configure project settings:
+4. Select the deployment branch: `main`.
+5. Configure project settings:
    - **Framework Preset**: `Vite`
    - **Root Directory**: Click *Edit* and select `frontend`.
    - **Build Command**: `npm run build`
    - **Output Directory**: `dist`
-5. Expand **Environment Variables**:
+6. Expand **Environment Variables**:
    - Key: `VITE_API_URL`
    - Value: `https://dprms-backend.onrender.com` *(Replace with your actual Render backend URL without trailing slash)*
-6. Click **Deploy**.
+7. Click **Deploy**.
 7. Once deployed, copy your public Vercel production URL:
    `https://your-project.vercel.app`
 
