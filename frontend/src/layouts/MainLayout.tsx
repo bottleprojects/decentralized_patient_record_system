@@ -20,11 +20,21 @@ export default function MainLayout() {
   }, [location.pathname]);
 
   const loadUser = async () => {
+    const token = localStorage.getItem('token') || localStorage.getItem('access_token');
+    if (!token) {
+      navigate('/login');
+      return;
+    }
     try {
       const data = await fetchApi('/users/me');
       setUser(data);
-    } catch (err) {
+    } catch (err: any) {
       console.error("Failed to load user info:", err);
+      if (err.message?.includes('validate') || err.message?.includes('authenticated') || err.message?.includes('Unauthorized')) {
+        localStorage.removeItem('access_token');
+        localStorage.removeItem('token');
+        navigate('/login');
+      }
     }
   };
 

@@ -67,7 +67,9 @@ export default function PatientDashboard() {
       try {
         const recordsData = await fetchApi('/records');
         setRecords(recordsData);
-      } catch (e) {}
+      } catch {
+        // Polling retry
+      }
     }, 3500);
     return () => clearInterval(interval);
   }, [records]);
@@ -98,8 +100,8 @@ export default function PatientDashboard() {
     try {
       await fetchApi(`/consent/revoke/${doctorId}`, { method: 'POST' });
       setConsents(consents.filter(c => c.doctor_id !== doctorId));
-    } catch (err) {
-      alert("Failed to revoke consent");
+    } catch (err: any) {
+      alert(err.message || "Failed to revoke consent");
     }
   };
 
@@ -109,8 +111,8 @@ export default function PatientDashboard() {
       setPendingRequests(pendingRequests.filter(r => r.id !== requestId));
       const consentsData = await fetchApi('/consent/active');
       setConsents(consentsData);
-    } catch (err) {
-      alert("Failed to approve request");
+    } catch (err: any) {
+      alert(err.message || "Failed to approve request");
     }
   };
 
@@ -118,8 +120,8 @@ export default function PatientDashboard() {
     try {
       await fetchApi(`/consent/requests/${requestId}/reject`, { method: 'POST' });
       setPendingRequests(pendingRequests.filter(r => r.id !== requestId));
-    } catch (err) {
-      alert("Failed to reject request");
+    } catch (err: any) {
+      alert(err.message || "Failed to reject request");
     }
   };
 

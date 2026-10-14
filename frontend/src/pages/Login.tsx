@@ -35,8 +35,10 @@ export default function Login() {
 
       localStorage.setItem('access_token', data.access_token);
       
-      // Decode JWT slightly to find role for routing
-      const payload = JSON.parse(atob(data.access_token.split('.')[1]));
+      // Decode JWT safely (handling base64url characters) to find role for routing
+      const base64Url = data.access_token.split('.')[1] || '';
+      const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+      const payload = JSON.parse(atob(base64));
       
       if (payload.role === 'admin') {
         navigate('/admin');

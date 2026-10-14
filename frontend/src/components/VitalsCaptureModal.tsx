@@ -344,7 +344,7 @@ export default function VitalsCaptureModal({
     return () => {
       if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
     };
-  }, [phase, sensorMode, telemetry, ecgBuffer.length]);
+  }, [phase, sensorMode, telemetry, ecgBuffer]);
 
   const handleReset = () => {
     setPhase('CALIBRATING');
