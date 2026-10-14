@@ -3,7 +3,7 @@ services:
   - type: web
     name: dprms-backend
     runtime: python
-    region: oregon
+    region: singapore
     plan: free
     rootDir: backend
     buildCommand: pip install -r requirements.txt
@@ -37,6 +37,8 @@ services:
         sync: false
       - key: PINATA_GATEWAY
         value: https://gateway.pinata.cloud
+      - key: MAX_DAILY_TRANSACTIONS
+        value: "50"
       - key: FRONTEND_URL
         sync: false
 
@@ -44,7 +46,7 @@ services:
   - type: web
     name: dprms-frontend
     runtime: static
-    region: oregon
+    region: singapore
     plan: free
     rootDir: frontend
     buildCommand: npm install && npm run build

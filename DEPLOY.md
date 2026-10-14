@@ -80,16 +80,18 @@ If you are setting up a fresh deployment or deploying a new smart contract insta
 
 ## Step 1: Provision Hosted PostgreSQL Database
 
-You can use **Neon.tech** (recommended for serverless Postgres with pooling) or **Render PostgreSQL**.
+You can use **Neon.tech** (recommended for serverless Postgres with connection pooling) or **Render PostgreSQL**.
 
 ### Option A: Neon.tech (Recommended)
-1. Go to [https://neon.tech](https://neon.tech) and log in or create a free account.
+1. Go to [https://neon.tech](https://neon.tech) and log in or create an account.
 2. Click **Create Project**.
-3. Name your project (e.g., `dprms-database`), select your nearest cloud region, and click **Create project**.
-4. On the project dashboard, locate the **Connection Details** card.
-5. Ensure the dropdown is set to **Pooled connection** and **Postgres**.
-6. Copy the connection string. It will look like:
-   `postgresql://neondb_owner:YOUR_PASSWORD@ep-xyz-pooler.us-east-2.aws.neon.tech/neondb?sslmode=require`
+3. Name your project (e.g., `dprms-production`).
+4. **IMPORTANT**: Select the cloud region **AWS ap-southeast-1 (Singapore)** to match your Render backend region and minimize latency.
+5. Ensure the database is a **FRESH Neon project** or an emptied one with zero test rows.
+6. On the project dashboard, locate the **Connection Details** card.
+7. Ensure the dropdown is set to **Pooled connection** and **Postgres**.
+8. Copy the connection string. It will look like:
+   `postgresql://neondb_owner:YOUR_PASSWORD@ep-xyz-pooler.ap-southeast-1.aws.neon.tech/neondb?sslmode=require`
    *(Save this URI for the backend `DATABASE_URL`)*.
 
 ---
@@ -102,7 +104,7 @@ You can use **Neon.tech** (recommended for serverless Postgres with pooling) or 
 4. Select the branch: `feature/ipfs-storage` (or `main` if merged).
 5. Fill in the service configuration details:
    - **Name**: `dprms-backend`
-   - **Region**: Choose a region close to your database (e.g., `Oregon (US West)` or `Frankfurt (EU Central)`).
+   - **Region**: **Singapore** *(matches your Neon database AWS ap-southeast-1 region)*
    - **Root Directory**: `backend`
    - **Runtime**: `Python 3`
    - **Build Command**: `pip install -r requirements.txt`
@@ -113,15 +115,18 @@ You can use **Neon.tech** (recommended for serverless Postgres with pooling) or 
    - **Auto-Deploy**: `Yes`
 7. In the **Environment Variables** section, add each key:
    - `ENVIRONMENT`: `production`
-   - `DATABASE_URL`: *(Paste your Neon or Render PostgreSQL connection URI)*
-   - `JWT_SECRET_KEY`: *(Generate using command below)*
-   - `ENCRYPTION_KEY`: *(Generate using command below)*
+   - `DATABASE_URL`: *(Paste your fresh production Neon pooled connection URI)*
+   - `JWT_SECRET_KEY`: *(Generate a NEW secret using the command below)*
+   - `ENCRYPTION_KEY`: *(Generate a NEW 32-byte key using the command below)*
+   - `ADMIN_EMAIL`: *(Your production system administrator email, e.g. `admin@yourdomain.com`)*
+   - `ADMIN_PASSWORD`: *(Generate a NEW strong password for production admin dashboard)*
    - `SEPOLIA_RPC_URL`: *(Your Alchemy or Infura Sepolia endpoint)*
-   - `PRIVATE_KEY`: *(Your throwaway Sepolia wallet private key)*
+   - `PRIVATE_KEY`: *(Your throwaway Sepolia wallet private key funded with testnet ETH)*
    - `CONTRACT_ADDRESS`: *(Your deployed PatientRecord contract address)*
    - `PINATA_API_KEY`: *(Your Pinata API Key)*
    - `PINATA_API_SECRET`: *(Your Pinata API Secret)*
    - `PINATA_GATEWAY`: `https://gateway.pinata.cloud`
+   - `MAX_DAILY_TRANSACTIONS`: `50`
    - `FRONTEND_URL`: *(Temporarily enter `http://localhost:5173` or your planned Vercel URL, then update in Step 4)*
 8. Click **Deploy Web Service**.
 9. Wait 2-3 minutes for Render to build and start the service. Once deployed, note your backend public URL:
@@ -130,7 +135,7 @@ You can use **Neon.tech** (recommended for serverless Postgres with pooling) or 
 
 > **Helper Commands to Generate Production Secrets (Run in Terminal):**
 >
-> *Security Note: `JWT_SECRET_KEY` and `ENCRYPTION_KEY` in production MUST be freshly generated and never reused across environments. Ensure `ENCRYPTION_KEY` is securely backed up; if this key is changed or lost, all previously encrypted files pinned to IPFS cannot be decrypted.*
+> *Security Note: `JWT_SECRET_KEY`, `ENCRYPTION_KEY`, `ADMIN_PASSWORD`, and `DATABASE_URL` in production MUST all be NEW values that have never been used in development or testing. Ensure `ENCRYPTION_KEY` is securely backed up; if this key is lost, all previously encrypted files pinned to IPFS cannot be decrypted.*
 >
 > ```bash
 > # Generate JWT_SECRET_KEY (32-byte hex)
@@ -138,6 +143,9 @@ You can use **Neon.tech** (recommended for serverless Postgres with pooling) or 
 >
 > # Generate ENCRYPTION_KEY (32-byte base64)
 > python3 -c "import os,base64; print(base64.b64encode(os.urandom(32)).decode())"
+>
+> # Generate ADMIN_PASSWORD (secure 16-character string)
+> python3 -c "import secrets; print(secrets.token_urlsafe(16))"
 > ```
 
 
