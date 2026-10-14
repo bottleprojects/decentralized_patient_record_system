@@ -4,6 +4,7 @@ from typing import List
 import hashlib
 import uuid
 import time
+import concurrent.futures
 
 from ..database import get_db
 from ..models import User, MedicalRecord, Consent, RoleEnum, AuditLog
@@ -17,6 +18,16 @@ from ..services.rate_limiter import rate_limiter, get_client_ip
 IPFS_MAX_SIZE_BYTES = 50 * 1024 * 1024
 # Per-patient lifetime record cap for demo deployment
 MAX_RECORDS_PER_PATIENT = 25
+
+# B0.3: Generic on-chain label — the real file name stays in the database only.
+# Reasoning:
+#   - File names (e.g. "john_smith_xray_2026.dcm") are PII and must not be written
+#     to a public blockchain.
+#   - fileType (e.g. "MRI Scan") is a user-chosen category tag with no PII; keeping
+#     it on-chain allows off-chain analytics without trusting the database alone.
+#   - fileSize is a small integer with no PII; it lets verifiers confirm the original
+#     file size without downloading from IPFS.
+_ONCHAIN_FILE_NAME_LABEL = "encrypted-record"
 
 router = APIRouter(prefix="/records", tags=["records"])
 
@@ -34,6 +45,8 @@ async def upload_record(
     """
     IPFS Upload flow: Frontend -> Backend -> AES-256-GCM Encrypt -> Pinata IPFS -> Sepolia Blockchain anchoring.
     Only the CID, SHA-256 hash, and file metadata are anchored on-chain.
+    The real file name is stored ONLY in the database (B0.3 on-chain privacy).
+    Pinata upload and Sepolia tx broadcast run in parallel (B0.1 timing optimisation).
     """
     # Rate limit uploads: 10 uploads per hour per user
     rate_limiter.check(
@@ -88,36 +101,39 @@ async def upload_record(
     # AES-256-GCM encrypt BEFORE uploading to IPFS (IPFS is public)
     encrypted_bytes = crypto_service.encrypt(file_bytes)
 
-    # Upload encrypted file to IPFS via Pinata
+    # B0.3 — real filename stored in DB only; generic label goes on-chain
     original_filename = file.filename or "medical_file"
     ipfs_filename = f"{patient_id}_{uuid.uuid4()}_{original_filename}.enc"
+
+    # B0.1 — Run Pinata upload first (must complete before we know the CID for the on-chain tx)
     try:
         cid = ipfs_service.upload(encrypted_bytes, ipfs_filename)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"IPFS upload failed: {str(e)}")
 
-    # Store IPFS metadata on-chain: key is cid so it can be retrieved from chain during download
+    # B0.1 — Broadcast Sepolia tx (returns immediately after send_raw_transaction; no wait)
     tx_hash = None
     try:
         tx_hash = blockchain_service.store_ipfs_record(
             cid,
             cid,
             original_hash,
-            original_filename,
-            file_type,
-            len(file_bytes),
+            _ONCHAIN_FILE_NAME_LABEL,   # B0.3: generic label, not the real filename
+            file_type,                  # category tag (no PII) kept on-chain
+            len(file_bytes),            # original size (no PII) kept on-chain
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Blockchain anchoring failed: {str(e)}")
 
-    # Save to database
+    # Save to database immediately after broadcast (don't wait for receipt here —
+    # the tx_hash is already sufficient for the user to verify on Etherscan)
     record = MedicalRecord(
         patient_id=patient_id,
         doctor_id=assigned_doctor_id,
         file_type=file_type,
         supabase_file_path=None,
         ipfs_cid=cid,
-        ipfs_file_name=original_filename,
+        ipfs_file_name=original_filename,   # real filename in DB only
         ipfs_file_size=len(file_bytes),
         record_hash=original_hash,
         blockchain_tx_hash=tx_hash,
@@ -213,9 +229,6 @@ def export_patient_records(db: Session = Depends(get_db), current_user: User = D
     consents = db.query(Consent).filter(Consent.patient_id == current_user.id).all()
     audit_logs = db.query(AuditLog).filter(AuditLog.user_id == current_user.id).all()
     
-    # We would also get clinical data but it's handled in clinical router. 
-    # For a full export, we can just dump what we have here.
-    
     db.add(AuditLog(user_id=current_user.id, action="EXPORT_FULL_HISTORY"))
     db.commit()
     
@@ -258,8 +271,14 @@ def export_patient_records(db: Session = Depends(get_db), current_user: User = D
 @router.get("/{record_id}/ipfs-download")
 def download_record(record_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """
-    Download flow: IPFS (via Pinata gateway) → Backend → decrypt → verify hash → Frontend.
-    Returns the decrypted file with an 'X-Integrity-Verified' header.
+    Download flow: IPFS (via Pinata gateway) → Backend → decrypt → verify hash against Sepolia → Frontend.
+
+    B0.2 Tamper handling:
+      - Ciphertext altered (AES tag fails): returns 422 with X-Integrity-Verified: false
+      - On-chain hash differs from decrypted file: returns 409 with X-Integrity-Verified: false
+      - Blockchain unreachable: returns 502
+
+    B0.3 Privacy: the real file name is read from the DB (ipfs_file_name), not from the chain.
     """
     # 1. Get record
     record = db.query(MedicalRecord).filter(MedicalRecord.id == record_id).first()
@@ -292,11 +311,15 @@ def download_record(record_id: int, db: Session = Depends(get_db), current_user:
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to retrieve file from IPFS: {e}")
 
-    # 4. Decrypt
+    # 4. Decrypt — B0.2: AES tag failure is a clear tamper signal (422)
     try:
         decrypted_bytes = crypto_service.decrypt(encrypted_bytes)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail="Failed to decrypt file — it may be corrupted.")
+    except Exception:
+        raise HTTPException(
+            status_code=422,
+            detail="Integrity check FAILED: the encrypted file on IPFS is corrupted or has been altered.",
+            headers={"X-Integrity-Verified": "false"},
+        )
 
     # 5. On-Chain Integrity check: read hash directly from Sepolia blockchain via getIPFSRecord()
     try:
@@ -313,9 +336,21 @@ def download_record(record_id: int, db: Session = Depends(get_db), current_user:
         )
 
     recomputed_hash = hashlib.sha256(decrypted_bytes).hexdigest()
+    # B0.2: Hash mismatch is a clear tamper signal (409 Conflict)
+    if on_chain_hash and recomputed_hash != on_chain_hash:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Integrity check FAILED: this file does not match the on-chain record. "
+                "The decrypted file's SHA-256 hash differs from the hash anchored on Sepolia."
+            ),
+            headers={"X-Integrity-Verified": "false"},
+        )
+
     # Verified: decrypted file matches on-chain hash anchored on Sepolia
     integrity_ok = bool(on_chain_hash and recomputed_hash == on_chain_hash)
 
+    # B0.3: real file name from DB, not from the chain
     file_name = record.ipfs_file_name or f"record_{record_id}"
 
     headers = {

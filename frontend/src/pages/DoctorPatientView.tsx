@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, CheckCircle2, Loader2, Clock, FileDown, FileText, ExternalLink } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, Loader2, Clock, FileDown, FileText, ExternalLink, ShieldAlert } from 'lucide-react';
 import { fetchApi, API_URL } from '../lib/api';
 
 interface Record {
@@ -20,6 +20,8 @@ export default function DoctorPatientView() {
   const [loading, setLoading] = useState(true);
   const [downloadingRecordId, setDownloadingRecordId] = useState<number | null>(null);
   const [integrityResults, setIntegrityResults] = useState<{ [key: number]: boolean | null }>({});
+  // B0.2: per-record error messages from tamper/integrity failures
+  const [downloadErrors, setDownloadErrors] = useState<{ [key: number]: string | null }>({});
 
   useEffect(() => {
     const fetchData = async () => {
@@ -47,6 +49,7 @@ export default function DoctorPatientView() {
   const handleDownload = async (recordId: number) => {
     try {
       setDownloadingRecordId(recordId);
+      setDownloadErrors(prev => ({ ...prev, [recordId]: null }));
       
       const token = localStorage.getItem('access_token');
       const response = await fetch(`${API_URL}/records/${recordId}/download`, {
@@ -55,6 +58,17 @@ export default function DoctorPatientView() {
           'Authorization': `Bearer ${token}`
         }
       });
+
+      // B0.2: 409 = hash mismatch (file altered), 422 = ciphertext corrupted — both are tamper signals
+      if (response.status === 409 || response.status === 422) {
+        const errorData = await response.json().catch(() => ({}));
+        setIntegrityResults(prev => ({ ...prev, [recordId]: false }));
+        setDownloadErrors(prev => ({
+          ...prev,
+          [recordId]: errorData.detail || 'Integrity check FAILED: this file does not match the on-chain record.'
+        }));
+        return;
+      }
       
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
@@ -186,6 +200,17 @@ export default function DoctorPatientView() {
                         <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-bold bg-green-50 text-green-700 border border-green-200">
                           <CheckCircle2 className="w-3.5 h-3.5" /> Integrity Verified ✓
                         </span>
+                      )}
+                      {integrityResults[record.id] === false && (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-bold bg-red-50 text-red-700 border border-red-200">
+                          <ShieldAlert className="w-3.5 h-3.5 text-red-600" /> Integrity FAILED ✗
+                        </span>
+                      )}
+                      {downloadErrors[record.id] && (
+                        <div className="mt-1 p-2 bg-red-50 border border-red-200 rounded text-xs text-red-700 flex items-start gap-1">
+                          <ShieldAlert className="w-3.5 h-3.5 text-red-600 flex-shrink-0 mt-0.5" />
+                          <span>{downloadErrors[record.id]}</span>
+                        </div>
                       )}
                     </div>
                   </td>

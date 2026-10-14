@@ -43,6 +43,8 @@ export default function PatientDashboard() {
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [downloadingRecordId, setDownloadingRecordId] = useState<number | null>(null);
   const [integrityResults, setIntegrityResults] = useState<{ [key: number]: boolean | null }>({});
+  // B0.2: per-record error messages from tamper/integrity failures
+  const [downloadErrors, setDownloadErrors] = useState<{ [key: number]: string | null }>({});
   const [user, setUser] = useState<any>(null);
 
   useEffect(() => {
@@ -138,12 +140,24 @@ export default function PatientDashboard() {
     try {
       setDownloadingRecordId(record.id);
       setIntegrityResults(prev => ({ ...prev, [record.id]: null }));
+      setDownloadErrors(prev => ({ ...prev, [record.id]: null }));
 
       const token = localStorage.getItem('access_token');
       const response = await fetch(`${API_URL}/records/${record.id}/ipfs-download`, {
         method: 'GET',
         headers: { 'Authorization': `Bearer ${token}` },
       });
+
+      // B0.2: 409 = hash mismatch (file altered), 422 = ciphertext corrupted — both are tamper signals
+      if (response.status === 409 || response.status === 422) {
+        const errorData = await response.json().catch(() => ({}));
+        setIntegrityResults(prev => ({ ...prev, [record.id]: false }));
+        setDownloadErrors(prev => ({
+          ...prev,
+          [record.id]: errorData.detail || 'Integrity check FAILED: this file does not match the on-chain record.'
+        }));
+        return;
+      }
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
@@ -296,66 +310,78 @@ export default function PatientDashboard() {
               ) : (
                 <div className="space-y-4">
                   {records.map((record) => (
-                    <div key={record.id} className="group flex flex-col sm:flex-row sm:items-center justify-between p-4 bg-white border border-slate-200 rounded-xl hover:border-blue-200 transition-all shadow-sm">
-                      <div className="flex items-start gap-4 mb-4 sm:mb-0">
-                        <div className="mt-1 p-2 bg-slate-50 rounded-lg border border-slate-100 shrink-0">
-                          <FileText className="w-6 h-6 text-slate-400" />
-                        </div>
-                        <div>
-                          <h4 className="font-semibold text-slate-800 leading-tight">{record.file_type || 'Clinical Document'}</h4>
-                          {record.description && (
-                            <p className="text-sm text-slate-600 mt-1">"{record.description}"</p>
-                          )}
-                          <p className="text-xs text-slate-500 font-medium mt-1">
-                            {record.doctor_id ? `Uploaded by Dr. ID: ${record.doctor_id}` : 'Uploaded by You'} • {record.created_at ? new Date(record.created_at).toLocaleDateString() : 'Unknown Date'}
-                          </p>
-                          <div className="mt-2 flex flex-wrap gap-1.5">
-                            {record.blockchain_tx_hash ? (
-                              <a
-                                href={`https://sepolia.etherscan.io/tx/${record.blockchain_tx_hash}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="badge badge-success gap-1 hover:underline cursor-pointer inline-flex items-center"
-                                title={`View Sepolia transaction: ${record.blockchain_tx_hash}`}
-                              >
-                                <ShieldCheck className="w-3 h-3" /> Blockchain Verified
-                                <ExternalLink className="w-2.5 h-2.5 ml-0.5 opacity-70" />
-                              </a>
-                            ) : (
-                              <span className="badge badge-warning gap-1">
-                                <ShieldAlert className="w-3 h-3" /> Pending Verification
-                              </span>
+                    <div key={record.id} className="p-4 bg-white border border-slate-200 rounded-xl hover:border-blue-200 transition-all shadow-sm">
+                      <div className="group flex flex-col sm:flex-row sm:items-center justify-between">
+                        <div className="flex items-start gap-4 mb-4 sm:mb-0">
+                          <div className="mt-1 p-2 bg-slate-50 rounded-lg border border-slate-100 shrink-0">
+                            <FileText className="w-6 h-6 text-slate-400" />
+                          </div>
+                          <div>
+                            <h4 className="font-semibold text-slate-800 leading-tight">{record.file_type || 'Clinical Document'}</h4>
+                            {record.description && (
+                              <p className="text-sm text-slate-600 mt-1">"{record.description}"</p>
                             )}
-                            {record.ipfs_cid && (
-                              <span className="badge gap-1" style={{background:'#ede9fe',color:'#6d28d9',border:'1px solid #ddd6fe'}}>
-                                <Globe className="w-3 h-3" /> IPFS
-                              </span>
-                            )}
-                            {integrityResults[record.id] === true && (
-                              <span className="badge gap-1" style={{background:'#dcfce7',color:'#15803d',border:'1px solid #bbf7d0'}}>
-                                <ShieldCheck className="w-3 h-3" /> Integrity Verified ✓
-                              </span>
-                            )}
-                            {integrityResults[record.id] === false && (
-                              <span className="badge gap-1" style={{background:'#fee2e2',color:'#b91c1c',border:'1px solid #fecaca'}}>
-                                <ShieldAlert className="w-3 h-3" /> Integrity FAILED ✗
-                              </span>
-                            )}
+                            <p className="text-xs text-slate-500 font-medium mt-1">
+                              {record.doctor_id ? `Uploaded by Dr. ID: ${record.doctor_id}` : 'Uploaded by You'} • {record.created_at ? new Date(record.created_at).toLocaleDateString() : 'Unknown Date'}
+                            </p>
+                            <div className="mt-2 flex flex-wrap gap-1.5">
+                              {record.blockchain_tx_hash ? (
+                                <a
+                                  href={`https://sepolia.etherscan.io/tx/${record.blockchain_tx_hash}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="badge badge-success gap-1 hover:underline cursor-pointer inline-flex items-center"
+                                  title={`View Sepolia transaction: ${record.blockchain_tx_hash}`}
+                                >
+                                  <ShieldCheck className="w-3 h-3" /> Blockchain Verified
+                                  <ExternalLink className="w-2.5 h-2.5 ml-0.5 opacity-70" />
+                                </a>
+                              ) : (
+                                <span className="badge badge-warning gap-1">
+                                  <ShieldAlert className="w-3 h-3" /> Pending Verification
+                                </span>
+                              )}
+                              {record.ipfs_cid && (
+                                <span className="badge gap-1" style={{background:'#ede9fe',color:'#6d28d9',border:'1px solid #ddd6fe'}}>
+                                  <Globe className="w-3 h-3" /> IPFS
+                                </span>
+                              )}
+                              {integrityResults[record.id] === true && (
+                                <span className="badge gap-1" style={{background:'#dcfce7',color:'#15803d',border:'1px solid #bbf7d0'}}>
+                                  <ShieldCheck className="w-3 h-3" /> Integrity Verified ✓
+                                </span>
+                              )}
+                              {integrityResults[record.id] === false && (
+                                <span className="badge gap-1" style={{background:'#fee2e2',color:'#b91c1c',border:'1px solid #fecaca'}}>
+                                  <ShieldAlert className="w-3 h-3" /> Integrity FAILED ✗
+                                </span>
+                              )}
+                            </div>
                           </div>
                         </div>
+                        <button 
+                          onClick={() => handleIPFSDownload(record)}
+                          disabled={downloadingRecordId === record.id}
+                          className="btn-secondary w-full sm:w-auto text-sm px-3 py-1.5 flex justify-center items-center gap-1.5"
+                        >
+                          {downloadingRecordId === record.id ? (
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                          ) : (
+                            <Download className="w-4 h-4" />
+                          )}
+                          Download
+                        </button>
                       </div>
-                      <button 
-                        onClick={() => handleIPFSDownload(record)}
-                        disabled={downloadingRecordId === record.id}
-                        className="btn-secondary w-full sm:w-auto text-sm px-3 py-1.5 flex justify-center items-center gap-1.5"
-                      >
-                        {downloadingRecordId === record.id ? (
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                        ) : (
-                          <Download className="w-4 h-4" />
-                        )}
-                        Download
-                      </button>
+                      {/* B0.2: Show clear red error message for tamper/integrity failures */}
+                      {downloadErrors[record.id] && (
+                        <div className="mt-2 p-3 bg-red-50 border border-red-200 rounded-lg flex items-start gap-2">
+                          <ShieldAlert className="w-4 h-4 text-red-600 flex-shrink-0 mt-0.5" />
+                          <div>
+                            <p className="text-sm font-bold text-red-800">Integrity Check FAILED</p>
+                            <p className="text-xs text-red-700 mt-0.5">{downloadErrors[record.id]}</p>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
