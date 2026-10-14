@@ -28,7 +28,7 @@ class IPFSService:
             "pinata_api_key": PINATA_API_KEY,
             "pinata_secret_api_key": PINATA_API_SECRET,
         }
-        response = requests.post(PINATA_PIN_URL, files=files, headers=headers, timeout=60)
+        response = requests.post(PINATA_PIN_URL, files=files, headers=headers, timeout=120)
         if response.status_code != 200:
             raise Exception(f"Pinata upload failed [{response.status_code}]: {response.text}")
 

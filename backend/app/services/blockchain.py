@@ -1,5 +1,6 @@
 import os
 import json
+import time
 from datetime import datetime
 from web3 import Web3
 from web3.middleware import ExtraDataToPOAMiddleware
@@ -22,6 +23,9 @@ if ABI_FILE.exists():
         CONTRACT_ABI = json.load(_f)
 else:
     raise RuntimeError(f"FATAL [Blockchain]: Contract ABI file not found at {ABI_FILE}")
+
+# Receipt polling interval in seconds (was using web3's default ~13s; now 2s)
+_RECEIPT_POLL_INTERVAL = 2
 
 
 class BlockchainService:
@@ -90,7 +94,11 @@ class BlockchainService:
             return counter.tx_count if counter else 0
 
     def _send_tx(self, fn_call) -> str:
-        """Helper: check limits and balance, build, sign, and send a transaction. Returns tx hash hex."""
+        """
+        Helper: check limits and balance, build, sign, and send a transaction.
+        Returns tx hash hex immediately after broadcast (does NOT wait for receipt).
+        The API layer can optionally poll for receipt.
+        """
         # 1. Enforce database-backed daily transaction limit
         self._check_and_increment_daily_tx()
 
@@ -111,6 +119,29 @@ class BlockchainService:
         tx_hash = self.w3.eth.send_raw_transaction(signed.raw_transaction)
 
         return self.w3.to_hex(tx_hash)
+
+    def wait_for_receipt(self, tx_hash: str, timeout: int = 180) -> dict:
+        """
+        Poll for a transaction receipt every _RECEIPT_POLL_INTERVAL seconds.
+        Raises RuntimeError if timeout exceeded or if transaction status != 1.
+        """
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            try:
+                receipt = self.w3.eth.get_transaction_receipt(tx_hash)
+            except Exception:
+                receipt = None
+            if receipt is not None:
+                if receipt.status != 1:
+                    raise RuntimeError(
+                        f"Sepolia transaction {tx_hash} was mined but FAILED (status=0). "
+                        "The record is pinned on IPFS but not anchored on-chain."
+                    )
+                return dict(receipt)
+            time.sleep(_RECEIPT_POLL_INTERVAL)
+        raise RuntimeError(
+            f"Timed out waiting for Sepolia receipt for tx {tx_hash} after {timeout}s."
+        )
 
     def store_record_hash(self, record_id: str, record_hash: str) -> str:
         """
@@ -139,8 +170,9 @@ class BlockchainService:
         file_size: int,
     ) -> str:
         """
-        Stores IPFS metadata (CID, hash, name, type, size) on-chain.
-        Returns the transaction hash.
+        Stores IPFS metadata (CID, hash, label, type, size) on-chain.
+        Returns the transaction hash immediately after broadcast.
+        NOTE: file_name should be a generic label ("encrypted-record"), not the real filename.
         """
         if not self.w3 or not self.w3.is_connected() or not self.contract:
             if self.simulate_blockchain:
@@ -166,7 +198,7 @@ class BlockchainService:
                 return {
                     "cid": "QmSimulatedCID",
                     "sha256_hash": "simulated_hash",
-                    "file_name": "simulated.pdf",
+                    "file_name": "encrypted-record",
                     "file_type": "PDF",
                     "file_size": 1024,
                     "timestamp": int(datetime.utcnow().timestamp()),
