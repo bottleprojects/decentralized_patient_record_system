@@ -76,8 +76,35 @@ async def keep_alive_task():
             
         await asyncio.sleep(4 * 60)  # 4 minutes
 
+def bootstrap_admin_user():
+    admin_email = os.getenv("ADMIN_EMAIL", "").strip()
+    admin_password = os.getenv("ADMIN_PASSWORD", "").strip()
+    if not admin_email or not admin_password:
+        return
+
+    from .database import SessionLocal
+    from .models import User, RoleEnum
+    from .services.auth import get_password_hash
+
+    with SessionLocal() as db:
+        existing = db.query(User).filter(User.email == admin_email).first()
+        if not existing:
+            admin_user = User(
+                email=admin_email,
+                hashed_password=get_password_hash(admin_password),
+                full_name="System Administrator",
+                role=RoleEnum.admin,
+                verification_status="verified",
+            )
+            db.add(admin_user)
+            db.commit()
+            print(f"INFO [Bootstrap]: Created admin user '{admin_email}'.")
+        else:
+            print(f"INFO [Bootstrap]: Admin user '{admin_email}' already exists.")
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    bootstrap_admin_user()
     task = asyncio.create_task(keep_alive_task())
     yield
     task.cancel()

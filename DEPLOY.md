@@ -30,7 +30,10 @@ This guide provides click-by-click instructions to deploy the DPRMS full-stack a
 | `PINATA_API_SECRET` | Pinata IPFS API Secret. |
 | `PINATA_GATEWAY` | Pinata Gateway URL (default: `https://gateway.pinata.cloud`). |
 | `FRONTEND_URL` | Public URL of the deployed frontend (e.g. `https://your-app.vercel.app`). No wildcard `*`. |
+| `ADMIN_EMAIL` | (Optional) Automated administrator email bootstrap (e.g. `admin@yourdomain.com`). |
+| `ADMIN_PASSWORD` | (Optional) Strong password for the administrator account to access `/admin`. |
 | `MAX_DAILY_TRANSACTIONS` | (Optional) Cap on daily on-chain anchoring transactions (default: `50`). |
+
 
 ### Frontend (Vercel or Render Static Site)
 | Variable Name | Description |
@@ -175,3 +178,10 @@ Perform this verification from a phone or non-local device (with your Mac closed
   - In the Render dashboard, click **Manual Deploy** → **Deploy latest commit** (or restart the service). This restarts the container with a clean, empty disk.
   - Refresh the patient dashboard on your phone.
   - Confirm the user session, patient records, IPFS CIDs, and blockchain hashes are still completely intact.
+- [ ] **8. Doctor Verification Workflow**:
+  - Register a new doctor account on the frontend.
+  - Notice the doctor account initially starts in `pending` status and cannot access or upload records.
+  - Log in as the administrator using `ADMIN_EMAIL` and `ADMIN_PASSWORD` at `/admin`.
+  - Navigate to the Doctor Verification tab, review the pending doctor registration, and click **Verify Doctor**.
+  - Log back in as the verified doctor and confirm access to patient records and IPFS uploads.
+
