@@ -134,6 +134,7 @@ async def upload_record(
         "record_id": record.id,
         "cid": cid,
         "sha256_hash": original_hash,
+        "record_hash": original_hash,
         "tx_hash": tx_hash,
         "file_size": len(file_bytes),
         "file_name": original_filename,
