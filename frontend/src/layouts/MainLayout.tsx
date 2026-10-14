@@ -147,10 +147,10 @@ export default function MainLayout() {
             </div>
           </div>
           <div className="flex gap-2">
-            <button onClick={() => setShowPasswordModal(true)} className="flex-1 flex items-center justify-center gap-2 py-2 text-xs font-semibold text-slate-600 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors">
+            <button onClick={() => setShowPasswordModal(true)} className="btn-secondary flex-1 py-1.5 text-xs flex items-center justify-center gap-1.5">
               <KeyRound className="w-3.5 h-3.5" /> Security
             </button>
-            <button onClick={() => { localStorage.removeItem('access_token'); navigate('/login'); }} className="flex-1 flex items-center justify-center gap-2 py-2 text-xs font-semibold text-red-600 bg-white border border-slate-200 rounded-lg hover:bg-red-50 transition-colors">
+            <button onClick={() => { localStorage.removeItem('access_token'); navigate('/login'); }} className="btn-danger flex-1 py-1.5 text-xs flex items-center justify-center gap-1.5">
               <LogOut className="w-3.5 h-3.5" /> Sign Out
             </button>
           </div>

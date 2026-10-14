@@ -276,7 +276,7 @@ export default function PatientDashboard() {
           </button>
           <button 
             onClick={() => setIsVitalsModalOpen(true)}
-            className="w-full sm:w-auto px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-sm font-semibold flex items-center justify-center gap-2 shadow-sm shadow-rose-500/20 transition-all cursor-pointer"
+            className="w-full sm:w-auto btn-rose flex items-center justify-center gap-2 text-sm"
           >
             <Activity className="w-4 h-4 animate-pulse" /> Take ECG & Pulse Oximetry (MAX30102 / AD8232)
           </button>
@@ -496,7 +496,7 @@ export default function PatientDashboard() {
                         <p className="text-sm font-bold text-slate-800">Doctor ID: {consent.doctor_id}</p>
                         <p className="text-xs text-slate-500">Granted: {new Date(consent.granted_at).toLocaleDateString()}</p>
                       </div>
-                      <button onClick={() => handleRevoke(consent.doctor_id)} className="text-xs font-semibold text-red-600 hover:text-red-700 underline px-2 py-1">
+                      <button onClick={() => handleRevoke(consent.doctor_id)} className="btn-danger text-xs py-1 px-3">
                         Revoke
                       </button>
                     </div>

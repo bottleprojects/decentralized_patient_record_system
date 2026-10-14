@@ -221,7 +221,7 @@ export default function DoctorDashboard() {
           
           <button 
             onClick={() => setShowEmergencyModal(true)}
-            className="w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2.5 bg-red-50 text-red-700 hover:bg-red-100 border border-red-200 font-semibold rounded-lg transition-colors"
+            className="w-full sm:w-auto btn-danger flex items-center justify-center gap-2 text-sm"
           >
             <ShieldAlert className="w-4 h-4" /> Emergency Access
           </button>
@@ -385,7 +385,7 @@ export default function DoctorDashboard() {
                       Pending
                     </span>
                   ) : (
-                    <button onClick={() => handleRequestConsent(p.id)} className="w-full sm:w-auto px-3 py-1.5 bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 font-semibold rounded text-xs transition-colors shrink-0">
+                    <button onClick={() => handleRequestConsent(p.id)} className="w-full sm:w-auto btn-secondary text-xs py-1.5 px-3 shrink-0">
                       Request Access
                     </button>
                   )}

@@ -352,13 +352,13 @@ export default function AdminDashboard() {
                       <div className="flex justify-end gap-2">
                         <button
                           onClick={() => handleVerifyDoctor(d.id, 'verified')}
-                          className="px-3 py-1.5 bg-emerald-600 text-white hover:bg-emerald-700 font-semibold rounded text-xs transition-colors shadow-sm"
+                          className="btn-success text-xs py-1.5 px-3"
                         >
                           Approve
                         </button>
                         <button
                           onClick={() => handleVerifyDoctor(d.id, 'rejected')}
-                          className="px-3 py-1.5 bg-white border border-slate-300 text-slate-600 hover:text-red-600 hover:border-red-200 hover:bg-red-50 font-semibold rounded text-xs transition-colors shadow-sm"
+                          className="btn-danger text-xs py-1.5 px-3"
                         >
                           Reject
                         </button>
