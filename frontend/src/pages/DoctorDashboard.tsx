@@ -1,8 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
-import { Search, CheckCircle2, Upload, Loader2, FileCheck, Users, ShieldAlert, UserPlus, ArrowRight, X, Cpu } from 'lucide-react';
+import { Search, CheckCircle2, Upload, Loader2, FileCheck, Users, ShieldAlert, UserPlus, ArrowRight, X } from 'lucide-react';
 import { fetchApi } from '../lib/api';
 import { useNavigate } from 'react-router-dom';
-import MetricsAnalyticsPanel from '../components/MetricsAnalyticsPanel';
 
 interface Record {
   id: number;
@@ -18,7 +17,6 @@ export default function DoctorDashboard() {
   const [records, setRecords] = useState<Record[]>([]);
   const [patients, setPatients] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'workspace' | 'analytics'>('workspace');
   
   // Upload State
   const [uploadPatientId, setUploadPatientId] = useState('');
@@ -227,45 +225,8 @@ export default function DoctorDashboard() {
           </button>
         </div>
       </div>
-
-      {/* Navigation Tabs */}
-      <div className="flex items-center gap-2 border-b border-slate-200 pb-3">
-        <button
-          type="button"
-          onClick={() => setActiveTab('workspace')}
-          className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
-            activeTab === 'workspace'
-              ? 'bg-blue-600 text-white shadow-sm shadow-blue-500/20'
-              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-          }`}
-        >
-          <Users className="w-4 h-4" />
-          <span>Clinical Workspace</span>
-        </button>
-        <button
-          type="button"
-          onClick={() => setActiveTab('analytics')}
-          className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
-            activeTab === 'analytics'
-              ? 'bg-blue-600 text-white shadow-sm shadow-blue-500/20'
-              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-          }`}
-        >
-          <Cpu className="w-4 h-4" />
-          <span>System Metrics & Blockchain Analytics</span>
-          <span className="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-1.5 py-0.5 rounded">
-            Live
-          </span>
-        </button>
-      </div>
-
-      {activeTab === 'analytics' ? (
-        <div className="pt-2">
-          <MetricsAnalyticsPanel />
-        </div>
-      ) : (
-        <>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      {/* Workspace Content */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* Upload Panel */}
         <div className="medical-card">
           <div className="p-5 sm:p-6 border-b border-slate-100 flex items-start gap-4">
@@ -460,8 +421,6 @@ export default function DoctorDashboard() {
           </table>
         </div>
       </div>
-      </>
-      )}
 
       {/* Emergency Access Modal */}
       {showEmergencyModal && (
