@@ -3,6 +3,8 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime
+import time
+import threading
 
 from ..database import get_db
 from ..models import User, RoleEnum, AuditLog, Consent, Prescription, Diagnosis, Observation
@@ -10,7 +12,42 @@ from ..services.auth import get_current_user
 
 router = APIRouter(prefix="/clinical", tags=["clinical"])
 
+# --- In-Memory IoT Telemetry Store ---
+_telemetry_lock = threading.Lock()
+LATEST_TELEMETRY = {
+    "device_id": "ESP32-VITALS-01",
+    "finger_detected": False,
+    "ir_value": 0,
+    "leads_off": True,
+    "heart_rate": 0,
+    "spo2": 0,
+    "ecg_samples": [],
+    "timestamp": None,
+    "received_at": None,
+}
+
+
+def update_telemetry(payload: dict):
+    """Thread-safe update of latest IoT telemetry packet."""
+    with _telemetry_lock:
+        for k in ["device_id", "finger_detected", "ir_value", "leads_off", "heart_rate", "spo2", "ecg_samples"]:
+            if k in payload:
+                LATEST_TELEMETRY[k] = payload[k]
+        now = time.time()
+        LATEST_TELEMETRY["received_at"] = now
+        LATEST_TELEMETRY["timestamp"] = payload.get("timestamp") or datetime.utcnow().isoformat() + "Z"
+
+
 # --- Pydantic Models ---
+class TelemetryIngest(BaseModel):
+    device_id: Optional[str] = "ESP32-VITALS-01"
+    finger_detected: bool = False
+    ir_value: Optional[int] = 0
+    leads_off: Optional[bool] = False
+    heart_rate: Optional[int] = 0
+    spo2: Optional[int] = 0
+    ecg_samples: Optional[List[int]] = []
+    timestamp: Optional[str] = None
 class PrescriptionCreate(BaseModel):
     patient_id: int
     medication_name: str
@@ -116,4 +153,50 @@ def get_patient_data(db: Session = Depends(get_db), current_user: User = Depends
         "prescriptions": prescriptions,
         "diagnoses": diagnoses,
         "observations": observations
+    }
+
+
+# --- IoT Telemetry Endpoints ---
+@router.post("/telemetry/ingest", status_code=status.HTTP_200_OK)
+def ingest_telemetry(data: TelemetryIngest):
+    """
+    Ingest live telemetry packet from ESP32 vitals sensor.
+    Unauthenticated to allow fast, lightweight push from microcontrollers over Wi-Fi.
+    """
+    update_telemetry(data.dict())
+    return {"status": "ok", "message": "Telemetry received"}
+
+
+@router.get("/telemetry/latest")
+def get_latest_telemetry(current_user: User = Depends(get_current_user)):
+    """
+    Fetch the latest buffered vitals telemetry packet with connection liveness.
+    Connected is True if a packet was received within the last 5.0 seconds.
+    """
+    with _telemetry_lock:
+        data = dict(LATEST_TELEMETRY)
+
+    received_at = data.get("received_at")
+    now = time.time()
+    if received_at is not None:
+        age_seconds = round(now - received_at, 2)
+        connected = age_seconds <= 5.0
+    else:
+        age_seconds = None
+        connected = False
+
+    return {
+        "connected": connected,
+        "age_seconds": age_seconds,
+        "device_id": data.get("device_id"),
+        "finger_detected": data.get("finger_detected", False),
+        "ir_value": data.get("ir_value", 0),
+        "leads_off": data.get("leads_off", False),
+        "heart_rate": data.get("heart_rate", 0),
+        "spo2": data.get("spo2", 0),
+        "ecg_samples": data.get("ecg_samples", []),
+        "timestamp": data.get("timestamp"),
+        "patient_id": current_user.id,
+        "patient_name": current_user.full_name,
+        "patient_email": current_user.email,
     }

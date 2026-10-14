@@ -5,13 +5,10 @@ import {
   Cpu, 
   HardDrive, 
   ExternalLink, 
-  Clock, 
   RefreshCw, 
-  TrendingDown, 
   CheckCircle2, 
   Lock, 
   FileCheck,
-  AlertOctagon,
   Info
 } from 'lucide-react';
 import { fetchApi } from '../lib/api';
@@ -45,35 +42,8 @@ interface RecentUpload {
 
 interface MetricsData {
   counters: MetricCounters;
-  charts: {
-    gas_comparison: {
-      naive_onchain: {
-        label: string;
-        gas: number;
-        gas_formatted: string;
-        storage_size: string;
-        feasible: boolean;
-        cost_estimate_usd: string;
-        note: string;
-      };
-      hybrid_architecture: {
-        label: string;
-        gas: number;
-        gas_formatted: string;
-        storage_size: string;
-        feasible: boolean;
-        cost_estimate_usd: string;
-        reduction_percentage: string;
-        note: string;
-      };
-    };
-    pipeline_latency: Array<{
-      stage: string;
-      avg_ms: number;
-      description: string;
-    }>;
-  };
   recent_uploads: RecentUpload[];
+  charts?: any;
 }
 
 export default function MetricsAnalyticsPanel() {
@@ -96,7 +66,7 @@ export default function MetricsAnalyticsPanel() {
       setError('');
     } catch (err: any) {
       console.error('Failed to load metrics:', err);
-      // Fallback mock dataset so the professor presentation is always guaranteed to render
+      // Fallback mock dataset so the presentation is always guaranteed to render
       setData({
         counters: {
           total_records: 12,
@@ -109,58 +79,13 @@ export default function MetricsAnalyticsPanel() {
           active_consents: 8,
           network: 'Ethereum Sepolia',
         },
-        charts: {
-          gas_comparison: {
-            naive_onchain: {
-              label: 'Naive On-Chain (5 MB X-Ray)',
-              gas: 3200000000,
-              gas_formatted: '~3.2B Gas',
-              storage_size: '5,242,880 Bytes',
-              feasible: false,
-              cost_estimate_usd: '$128,000+',
-              note: 'Exceeds Ethereum block gas limit (30M) by 106x. Technically impossible to mine.',
-            },
-            hybrid_architecture: {
-              label: 'DPRMS Hybrid (IPFS + On-Chain)',
-              gas: 75000,
-              gas_formatted: '~75,000 Gas',
-              storage_size: '128 Bytes (CID + Hash)',
-              feasible: true,
-              cost_estimate_usd: '< $0.05',
-              reduction_percentage: '99.998%',
-              note: 'Constant O(1) gas cost independent of original file size.',
-            },
-          },
-          pipeline_latency: [
-            {
-              stage: 'AES-256-GCM Encryption',
-              avg_ms: 42,
-              description: 'Client & container symmetric cipher with authenticated tags',
-            },
-            {
-              stage: 'Pinata IPFS Pinning',
-              avg_ms: 315,
-              description: 'Off-chain distributed content-addressed storage propagation',
-            },
-            {
-              stage: 'Blockchain Hash Anchoring',
-              avg_ms: 1150,
-              description: 'Smart contract immutable state write & Sepolia block broadcast',
-            },
-            {
-              stage: 'SHA-256 Integrity Verification',
-              avg_ms: 16,
-              description: 'On-demand tamper-evidence check comparing decrypted bytes to on-chain hash',
-            },
-          ],
-        },
         recent_uploads: [
           {
             id: 101,
-            file_name: 'chest_xray_bilateral.png',
+            file_name: 'clinical_vitals_report.pdf',
             file_type: 'Observation (Vitals)',
-            file_size: 2457600,
-            file_size_formatted: '2.34 MB',
+            file_size: 245760,
+            file_size_formatted: '240 KB',
             ipfs_cid: 'QmZtmD2qt8fJv3CL8EyjqK7uV25U25x4xaKzv41WuW8R',
             ipfs_gateway_url: 'https://gateway.pinata.cloud/ipfs/QmZtmD2qt8fJv3CL8EyjqK7uV25U25x4xaKzv41WuW8R',
             record_hash: '8f434346648f6b96df89dda901c5176b10a6d83961dd3c1ac88b59b2dc327aa4',
@@ -191,10 +116,7 @@ export default function MetricsAnalyticsPanel() {
   }
 
   const counters = data?.counters;
-  const gasComp = data?.charts.gas_comparison;
-  const latencyStages = data?.charts.pipeline_latency || [];
   const recentUploads = data?.recent_uploads || [];
-  const totalPipelineMs = latencyStages.reduce((acc, curr) => acc + curr.avg_ms, 0);
 
   return (
     <div className="space-y-8">
@@ -297,178 +219,7 @@ export default function MetricsAnalyticsPanel() {
         </div>
       </div>
 
-      {/* 2. Visual Comparison Charts Section */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* CHART 1: On-Chain Gas & Storage Comparison */}
-        <div className="medical-card p-6 flex flex-col justify-between">
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <div className="flex items-center gap-2">
-                <span className="p-1.5 bg-blue-50 text-blue-700 rounded-lg">
-                  <TrendingDown className="w-4 h-4" />
-                </span>
-                <h3 className="text-base font-bold text-slate-800">
-                  On-Chain Gas & Storage Architecture Comparison
-                </h3>
-              </div>
-              <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
-                -99.99% Gas
-              </span>
-            </div>
-            <p className="text-xs text-slate-500 mb-6">
-              Comparing raw blockchain file storage against DPRMS hybrid content-addressed architecture.
-            </p>
-
-            {/* Comparison Bars */}
-            <div className="space-y-5">
-              {/* Naive Approach */}
-              <div className="bg-red-50/60 border border-red-200/70 rounded-xl p-4">
-                <div className="flex items-center justify-between text-xs font-semibold text-slate-700 mb-1.5">
-                  <span className="flex items-center gap-1.5 text-red-900 font-bold">
-                    <AlertOctagon className="w-3.5 h-3.5 text-red-600" />
-                    {gasComp?.naive_onchain.label || 'Naive On-Chain Storage (5 MB X-Ray)'}
-                  </span>
-                  <span className="font-mono text-red-700 font-bold">
-                    {gasComp?.naive_onchain.gas_formatted || '~3.2 Billion Gas'}
-                  </span>
-                </div>
-                
-                {/* Visual Bar */}
-                <div className="w-full h-4 bg-red-200 rounded-full overflow-hidden mb-2 relative">
-                  <div className="h-full bg-red-600 rounded-full w-full"></div>
-                </div>
-
-                <div className="flex items-center justify-between text-[11px] text-red-700">
-                  <span>Storage: {gasComp?.naive_onchain.storage_size || '5,242,880 Bytes'} on-chain</span>
-                  <span className="font-semibold text-red-800 uppercase tracking-wide">
-                    Exceeds 30M Block Limit (Impossible)
-                  </span>
-                </div>
-              </div>
-
-              {/* DPRMS Hybrid Architecture */}
-              <div className="bg-emerald-50/70 border border-emerald-300 rounded-xl p-4 shadow-sm">
-                <div className="flex items-center justify-between text-xs font-semibold text-slate-700 mb-1.5">
-                  <span className="flex items-center gap-1.5 text-emerald-900 font-bold">
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                    {gasComp?.hybrid_architecture.label || 'DPRMS Hybrid (Pinata IPFS + On-Chain Anchor)'}
-                  </span>
-                  <span className="font-mono text-emerald-700 font-bold">
-                    {gasComp?.hybrid_architecture.gas_formatted || '~75,000 Gas'}
-                  </span>
-                </div>
-
-                {/* Visual Bar */}
-                <div className="w-full h-4 bg-emerald-100 rounded-full overflow-hidden mb-2 relative">
-                  <div 
-                    className="h-full bg-emerald-600 rounded-full transition-all duration-1000"
-                    style={{ width: '0.5%' }}
-                  ></div>
-                  <div className="absolute inset-0 flex items-center pl-2 text-[10px] font-bold text-emerald-800">
-                    O(1) Fixed Cost (&lt; 0.002% of block limit)
-                  </div>
-                </div>
-
-                <div className="flex items-center justify-between text-[11px] text-emerald-800 font-medium">
-                  <span>On-Chain: {gasComp?.hybrid_architecture.storage_size || '128 Bytes (CID + SHA-256 Hash)'}</span>
-                  <span className="font-bold text-emerald-700 bg-emerald-100/80 px-2 py-0.5 rounded">
-                    {gasComp?.hybrid_architecture.reduction_percentage || '99.998%'} Gas Reduction
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Architectural Callout for Professor */}
-          <div className="mt-5 p-3.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-600 leading-relaxed">
-            <strong className="text-slate-800 font-semibold block mb-1">
-              Why this matters for your presentation:
-            </strong>
-            Storinɡ 5 MB of raw patient imaging on Ethereum is mathematically impossible because a single Ethereum block has a 30M gas ceiling. DPRMS achieves infinite scaling by decoupling storage (IPFS cluster) from consensus (Sepolia immutable smart contract).
-          </div>
-        </div>
-
-        {/* CHART 2: Latency & Pipeline Breakdown */}
-        <div className="medical-card p-6 flex flex-col justify-between">
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <div className="flex items-center gap-2">
-                <span className="p-1.5 bg-indigo-50 text-indigo-700 rounded-lg">
-                  <Clock className="w-4 h-4" />
-                </span>
-                <h3 className="text-base font-bold text-slate-800">
-                  End-to-End Upload & Anchoring Pipeline Latency
-                </h3>
-              </div>
-              <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 font-mono">
-                Total ~{totalPipelineMs} ms
-              </span>
-            </div>
-            <p className="text-xs text-slate-500 mb-6">
-              Empirical execution time breakdown across all cryptographic and distributed storage stages.
-            </p>
-
-            {/* Segmented Pipeline Progress Bar */}
-            <div className="mb-6">
-              <div className="flex h-3 rounded-full overflow-hidden shadow-inner bg-slate-100">
-                <div style={{ width: '4%' }} className="bg-purple-500" title="AES-256-GCM (~42ms)"></div>
-                <div style={{ width: '20%' }} className="bg-blue-500" title="IPFS Pinning (~315ms)"></div>
-                <div style={{ width: '74%' }} className="bg-indigo-600" title="Sepolia Block Anchoring (~1150ms)"></div>
-                <div style={{ width: '2%' }} className="bg-emerald-500" title="SHA-256 Check (~16ms)"></div>
-              </div>
-              <div className="flex justify-between text-[10px] text-slate-400 mt-1 font-mono">
-                <span>0 ms</span>
-                <span>Upload Started</span>
-                <span>Tx Confirmed (~{totalPipelineMs} ms)</span>
-              </div>
-            </div>
-
-            {/* 4 Pipeline Step Cards */}
-            <div className="space-y-2.5">
-              {latencyStages.map((stage, idx) => {
-                const colors = [
-                  'border-l-purple-500 text-purple-700 bg-purple-50/50',
-                  'border-l-blue-500 text-blue-700 bg-blue-50/50',
-                  'border-l-indigo-600 text-indigo-700 bg-indigo-50/50',
-                  'border-l-emerald-500 text-emerald-700 bg-emerald-50/50',
-                ][idx % 4];
-
-                return (
-                  <div
-                    key={stage.stage}
-                    className={`border border-slate-200/80 border-l-4 rounded-lg p-2.5 flex items-center justify-between text-xs ${colors}`}
-                  >
-                    <div>
-                      <div className="font-semibold text-slate-800 flex items-center gap-1.5">
-                        <span className="font-mono text-[10px] bg-white px-1.5 py-0.5 rounded border border-slate-200">
-                          Step {idx + 1}
-                        </span>
-                        <span>{stage.stage}</span>
-                      </div>
-                      <p className="text-[11px] text-slate-500 mt-0.5 line-clamp-1">{stage.description}</p>
-                    </div>
-                    <div className="text-right shrink-0 ml-3">
-                      <span className="font-mono font-bold text-slate-800 text-xs">{stage.avg_ms} ms</span>
-                      <span className="block text-[10px] text-slate-400">
-                        {Math.round((stage.avg_ms / totalPipelineMs) * 100)}%
-                      </span>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="mt-5 p-3.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-600 leading-relaxed">
-            <strong className="text-slate-800 font-semibold block mb-1">
-              Optimization Highlight:
-            </strong>
-            Pinata IPFS upload and Ethereum transaction broadcast execute concurrently in the backend to ensure interactive UI responsiveness while maintaining cryptographic immutability.
-          </div>
-        </div>
-      </div>
-
-      {/* 3. Recent Audit Log Table */}
+      {/* 2. Recent Audit Log Table */}
       <div className="medical-card overflow-hidden">
         <div className="p-5 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
           <div>

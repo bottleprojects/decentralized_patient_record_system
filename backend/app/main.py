@@ -1,4 +1,5 @@
 import os
+import json
 # pyrefly: ignore [missing-import]
 from fastapi import FastAPI, Response, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -104,12 +105,61 @@ def bootstrap_admin_user():
         else:
             print(f"INFO [Bootstrap]: Admin user '{admin_email}' already exists.")
 
+async def handle_iot_client(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
+    """Handle raw TCP stream from ESP32 vitals sensor sending newline-delimited JSON."""
+    try:
+        buffer = ""
+        while True:
+            chunk = await reader.read(1024)
+            if not chunk:
+                break
+            buffer += chunk.decode("utf-8", errors="ignore")
+            while "\n" in buffer:
+                line, buffer = buffer.split("\n", 1)
+                line = line.strip()
+                if line:
+                    try:
+                        payload = json.loads(line)
+                        if isinstance(payload, dict):
+                            from .routers.clinical import update_telemetry
+                            update_telemetry(payload)
+                    except Exception as e:
+                        print(f"Warning [IoT TCP]: Invalid JSON received: {e}")
+    except Exception as e:
+        print(f"Warning [IoT TCP Client]: {e}")
+    finally:
+        try:
+            writer.close()
+            await writer.wait_closed()
+        except Exception:
+            pass
+
+
+async def start_iot_tcp_server():
+    """Start asynchronous TCP socket server for ESP32 telemetry with graceful port fallback."""
+    port = int(os.getenv("IOT_TCP_PORT", "8765"))
+    try:
+        server = await asyncio.start_server(handle_iot_client, "0.0.0.0", port)
+        print(f"INFO [IoT]: Raw TCP telemetry listener running on 0.0.0.0:{port}")
+        return server
+    except Exception as e:
+        print(f"WARNING [IoT]: Failed to bind TCP listener on port {port}: {e}")
+        return None
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     bootstrap_admin_user()
     task = asyncio.create_task(keep_alive_task())
+    tcp_server = await start_iot_tcp_server()
     yield
     task.cancel()
+    if tcp_server:
+        tcp_server.close()
+        try:
+            await tcp_server.wait_closed()
+        except Exception:
+            pass
 
 app = FastAPI(
     title="Decentralized Patient Record System API",

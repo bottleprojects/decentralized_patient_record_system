@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { ShieldCheck, ShieldAlert, FileText, Download, Loader2, User, FileHeart, Bell, Upload, X, Shield, Globe, ExternalLink } from 'lucide-react';
+import { ShieldCheck, ShieldAlert, FileText, Download, Loader2, User, FileHeart, Bell, Upload, X, Shield, Globe, ExternalLink, Activity } from 'lucide-react';
 import { fetchApi, API_URL } from '../lib/api';
+import VitalsCaptureModal from '../components/VitalsCaptureModal';
 
 const IPFS_MAX_MB = 50;
 
@@ -47,6 +48,16 @@ export default function PatientDashboard() {
   // B0.2: per-record error messages from tamper/integrity failures
   const [downloadErrors, setDownloadErrors] = useState<{ [key: number]: string | null }>({});
   const [user, setUser] = useState<any>(null);
+  const [isVitalsModalOpen, setIsVitalsModalOpen] = useState(false);
+
+  const refreshRecords = async () => {
+    try {
+      const recordsData = await fetchApi('/records');
+      setRecords(recordsData);
+    } catch (e) {
+      console.error('Failed to refresh records:', e);
+    }
+  };
 
   // Poll records while any record is still confirming on Sepolia
   useEffect(() => {
@@ -262,6 +273,12 @@ export default function PatientDashboard() {
             className="w-full sm:w-auto btn-secondary flex items-center justify-center gap-2 text-sm"
           >
             <Download className="w-4 h-4" /> Export History
+          </button>
+          <button 
+            onClick={() => setIsVitalsModalOpen(true)}
+            className="w-full sm:w-auto px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-sm font-semibold flex items-center justify-center gap-2 shadow-sm shadow-rose-500/20 transition-all cursor-pointer"
+          >
+            <Activity className="w-4 h-4 animate-pulse" /> Take ECG & Pulse Oximetry (MAX30102 / AD8232)
           </button>
           <button onClick={() => setIsUploadModalOpen(true)} className="w-full sm:w-auto btn-primary flex items-center justify-center gap-2 text-sm">
             <Upload className="w-4 h-4" /> Upload Record
@@ -579,6 +596,16 @@ export default function PatientDashboard() {
           </div>
         </div>
       )}
+
+      {/* Vitals Capture Modal (ESP32 MAX30102 + AD8232) */}
+      <VitalsCaptureModal
+        isOpen={isVitalsModalOpen}
+        onClose={() => setIsVitalsModalOpen(false)}
+        onUploadSuccess={refreshRecords}
+        patientId={user?.id}
+        patientName={user?.full_name}
+        patientEmail={user?.email}
+      />
     </div>
   );
 }
