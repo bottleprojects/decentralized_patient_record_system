@@ -10,6 +10,7 @@ interface Record {
   created_at: string;
   patient_id: number;
   blockchain_tx_hash: string | null;
+  blockchain_status?: 'confirming' | 'confirmed' | 'failed';
   ipfs_cid?: string;
 }
 
@@ -175,8 +176,30 @@ export default function DoctorPatientView() {
                   </td>
                   <td className="py-4 px-6">
                     <div className="flex flex-wrap items-center gap-1.5">
-                      {record.blockchain_tx_hash ? (
-                        <a
+                      {record.blockchain_status === 'confirming' ? (
+                        <a 
+                          href={`https://sepolia.etherscan.io/tx/${record.blockchain_tx_hash}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200 hover:underline cursor-pointer"
+                          title={`Confirming on Sepolia: ${record.blockchain_tx_hash}`}
+                        >
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" /> Confirming...
+                          <ExternalLink className="w-2.5 h-2.5 ml-0.5 opacity-70" />
+                        </a>
+                      ) : record.blockchain_status === 'failed' ? (
+                        <a 
+                          href={record.blockchain_tx_hash ? `https://sepolia.etherscan.io/tx/${record.blockchain_tx_hash}` : '#'}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-bold bg-red-50 text-red-700 border border-red-200 hover:underline cursor-pointer"
+                          title={`Anchoring failed on Sepolia: ${record.blockchain_tx_hash}`}
+                        >
+                          <ShieldAlert className="w-3.5 h-3.5 text-red-600" /> Anchoring failed
+                          {record.blockchain_tx_hash && <ExternalLink className="w-2.5 h-2.5 ml-0.5 opacity-70" />}
+                        </a>
+                      ) : record.blockchain_tx_hash ? (
+                        <a 
                           href={`https://sepolia.etherscan.io/tx/${record.blockchain_tx_hash}`}
                           target="_blank"
                           rel="noopener noreferrer"

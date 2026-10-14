@@ -11,6 +11,7 @@ interface Record {
   created_at: string;
   doctor_id: number;
   blockchain_tx_hash: string | null;
+  blockchain_status?: 'confirming' | 'confirmed' | 'failed';
   ipfs_cid: string | null;
   ipfs_file_name: string | null;
   ipfs_file_size: number | null;
@@ -46,6 +47,19 @@ export default function PatientDashboard() {
   // B0.2: per-record error messages from tamper/integrity failures
   const [downloadErrors, setDownloadErrors] = useState<{ [key: number]: string | null }>({});
   const [user, setUser] = useState<any>(null);
+
+  // Poll records while any record is still confirming on Sepolia
+  useEffect(() => {
+    const hasConfirming = records.some(r => r.blockchain_status === 'confirming');
+    if (!hasConfirming) return;
+    const interval = setInterval(async () => {
+      try {
+        const recordsData = await fetchApi('/records');
+        setRecords(recordsData);
+      } catch (e) {}
+    }, 3500);
+    return () => clearInterval(interval);
+  }, [records]);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -325,7 +339,30 @@ export default function PatientDashboard() {
                               {record.doctor_id ? `Uploaded by Dr. ID: ${record.doctor_id}` : 'Uploaded by You'} • {record.created_at ? new Date(record.created_at).toLocaleDateString() : 'Unknown Date'}
                             </p>
                             <div className="mt-2 flex flex-wrap gap-1.5">
-                              {record.blockchain_tx_hash ? (
+                              {record.blockchain_status === 'confirming' ? (
+                                <a
+                                  href={`https://sepolia.etherscan.io/tx/${record.blockchain_tx_hash}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="badge badge-warning gap-1 hover:underline cursor-pointer inline-flex items-center"
+                                  title={`Confirming on Sepolia: ${record.blockchain_tx_hash}`}
+                                >
+                                  <Loader2 className="w-3 h-3 animate-spin text-amber-700" /> Confirming on Sepolia...
+                                  <ExternalLink className="w-2.5 h-2.5 ml-0.5 opacity-70" />
+                                </a>
+                              ) : record.blockchain_status === 'failed' ? (
+                                <a
+                                  href={record.blockchain_tx_hash ? `https://sepolia.etherscan.io/tx/${record.blockchain_tx_hash}` : '#'}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="badge gap-1 hover:underline cursor-pointer inline-flex items-center"
+                                  style={{ background: '#fee2e2', color: '#b91c1c', border: '1px solid #fecaca' }}
+                                  title={`Anchoring failed on Sepolia: ${record.blockchain_tx_hash}`}
+                                >
+                                  <ShieldAlert className="w-3 h-3 text-red-600" /> Anchoring failed
+                                  {record.blockchain_tx_hash && <ExternalLink className="w-2.5 h-2.5 ml-0.5 opacity-70" />}
+                                </a>
+                              ) : record.blockchain_tx_hash ? (
                                 <a
                                   href={`https://sepolia.etherscan.io/tx/${record.blockchain_tx_hash}`}
                                   target="_blank"

@@ -38,6 +38,7 @@ class MedicalRecord(Base):
     ipfs_file_name = Column(String, nullable=True) # Original file name
     ipfs_file_size = Column(Integer, nullable=True) # File size in bytes
     blockchain_tx_hash = Column(String, nullable=True) # The tx hash where the record hash was stored
+    blockchain_status = Column(String, default="confirming") # confirming, confirmed, failed
     record_hash = Column(String, nullable=True) # SHA-256 hash of the original file (pre-encrypt)
     description = Column(String, nullable=True) # Description of the medical record
     created_at = Column(DateTime, default=datetime.utcnow)

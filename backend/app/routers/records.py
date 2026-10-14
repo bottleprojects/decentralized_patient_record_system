@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Response, Request
+import os
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Response, Request, BackgroundTasks
 from sqlalchemy.orm import Session
 from typing import List
 import hashlib
@@ -14,27 +15,44 @@ from ..services.blockchain import blockchain_service
 from ..services.ipfs import ipfs_service
 from ..services.rate_limiter import rate_limiter, get_client_ip
 
-# File size limit for IPFS uploads: 50 MB
-IPFS_MAX_SIZE_BYTES = 50 * 1024 * 1024
+# File size limit for IPFS uploads: configurable via MAX_UPLOAD_MB (default 10 MB in production)
+MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "10"))
+IPFS_MAX_SIZE_BYTES = MAX_UPLOAD_MB * 1024 * 1024
+
 # Per-patient lifetime record cap for demo deployment
 MAX_RECORDS_PER_PATIENT = 25
 
 # B0.3: Generic on-chain label — the real file name stays in the database only.
-# Reasoning:
-#   - File names (e.g. "john_smith_xray_2026.dcm") are PII and must not be written
-#     to a public blockchain.
-#   - fileType (e.g. "MRI Scan") is a user-chosen category tag with no PII; keeping
-#     it on-chain allows off-chain analytics without trusting the database alone.
-#   - fileSize is a small integer with no PII; it lets verifiers confirm the original
-#     file size without downloading from IPFS.
 _ONCHAIN_FILE_NAME_LABEL = "encrypted-record"
 
 router = APIRouter(prefix="/records", tags=["records"])
+
+
+def confirm_blockchain_record(record_id: int, tx_hash: str):
+    """
+    Background task: polls Sepolia for receipt and updates record.blockchain_status.
+    - status == 1 -> 'confirmed'
+    - status == 0 / reverted / timeout -> 'failed'
+    """
+    from ..database import SessionLocal
+    from ..services.blockchain import blockchain_service
+    try:
+        receipt = blockchain_service.wait_for_receipt(tx_hash, timeout=180)
+        new_status = "confirmed" if receipt.get("status") == 1 else "failed"
+    except Exception:
+        new_status = "failed"
+    with SessionLocal() as db:
+        rec = db.query(MedicalRecord).filter(MedicalRecord.id == record_id).first()
+        if rec:
+            rec.blockchain_status = new_status
+            db.commit()
+
 
 @router.post("", status_code=status.HTTP_201_CREATED)
 @router.post("/ipfs-upload", status_code=status.HTTP_201_CREATED)
 async def upload_record(
     request: Request,
+    background_tasks: BackgroundTasks,
     patient_id: int = Form(...),
     file_type: str = Form(...),
     description: str = Form(None),
@@ -85,15 +103,40 @@ async def upload_record(
             detail=f"Patient upload cap reached: maximum {MAX_RECORDS_PER_PATIENT} records allowed per patient in this demo."
         )
 
-    # Read file
-    file_bytes = await file.read()
+    # Enforce upload size limit BEFORE buffering full file into memory
+    content_length = request.headers.get("content-length")
+    if content_length:
+        try:
+            if int(content_length) > IPFS_MAX_SIZE_BYTES:
+                raise HTTPException(
+                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    detail=f"File too large. Maximum allowed size is {MAX_UPLOAD_MB} MB."
+                )
+        except ValueError:
+            pass
 
-    # File size validation (50 MB limit)
-    if len(file_bytes) > IPFS_MAX_SIZE_BYTES:
+    if getattr(file, "size", None) is not None and file.size > IPFS_MAX_SIZE_BYTES:
         raise HTTPException(
-            status_code=413,
-            detail=f"File too large. Maximum allowed size is 50 MB (got {len(file_bytes) / (1024*1024):.1f} MB)."
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"File too large. Maximum allowed size is {MAX_UPLOAD_MB} MB."
         )
+
+    # Read file safely in chunks to enforce limit without unbounded buffering
+    chunks = []
+    total_bytes = 0
+    chunk_size = 1024 * 1024  # 1 MB
+    while True:
+        chunk = await file.read(chunk_size)
+        if not chunk:
+            break
+        total_bytes += len(chunk)
+        if total_bytes > IPFS_MAX_SIZE_BYTES:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail=f"File too large. Maximum allowed size is {MAX_UPLOAD_MB} MB."
+            )
+        chunks.append(chunk)
+    file_bytes = b"".join(chunks)
 
     # SHA-256 of original (pre-encrypt) file — this is what goes on-chain
     original_hash = hashlib.sha256(file_bytes).hexdigest()
@@ -137,6 +180,7 @@ async def upload_record(
         ipfs_file_size=len(file_bytes),
         record_hash=original_hash,
         blockchain_tx_hash=tx_hash,
+        blockchain_status="confirming",
         description=description,
     )
     db.add(record)
@@ -145,6 +189,9 @@ async def upload_record(
     db.commit()
     db.refresh(record)
 
+    # Launch background receipt verification
+    background_tasks.add_task(confirm_blockchain_record, record.id, tx_hash)
+
     return {
         "message": "File encrypted and stored on IPFS successfully",
         "record_id": record.id,
@@ -152,8 +199,30 @@ async def upload_record(
         "sha256_hash": original_hash,
         "record_hash": original_hash,
         "tx_hash": tx_hash,
+        "blockchain_status": "confirming",
         "file_size": len(file_bytes),
         "file_name": original_filename,
+    }
+
+
+@router.get("/{record_id}/status")
+def get_record_status(record_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Status check endpoint for polling confirmation state."""
+    record = db.query(MedicalRecord).filter(MedicalRecord.id == record_id).first()
+    if not record:
+        raise HTTPException(status_code=404, detail="Record not found")
+    if record.blockchain_status == "confirming" and record.blockchain_tx_hash:
+        try:
+            receipt = blockchain_service.w3.eth.get_transaction_receipt(record.blockchain_tx_hash)
+            if receipt:
+                record.blockchain_status = "confirmed" if receipt.status == 1 else "failed"
+                db.commit()
+        except Exception:
+            pass
+    return {
+        "record_id": record.id,
+        "blockchain_status": record.blockchain_status or "confirmed",
+        "blockchain_tx_hash": record.blockchain_tx_hash,
     }
 
 
@@ -172,6 +241,7 @@ def get_records(db: Session = Depends(get_db), current_user: User = Depends(get_
             "ipfs_file_name": r.ipfs_file_name,
             "ipfs_file_size": r.ipfs_file_size,
             "blockchain_tx_hash": r.blockchain_tx_hash,
+            "blockchain_status": r.blockchain_status or ("confirmed" if r.blockchain_tx_hash else "confirming"),
             "record_hash": r.record_hash,
             "description": r.description,
             "created_at": r.created_at.isoformat() if r.created_at else None
@@ -194,6 +264,7 @@ def get_records(db: Session = Depends(get_db), current_user: User = Depends(get_
             "ipfs_file_name": r.ipfs_file_name,
             "ipfs_file_size": r.ipfs_file_size,
             "blockchain_tx_hash": r.blockchain_tx_hash,
+            "blockchain_status": r.blockchain_status or ("confirmed" if r.blockchain_tx_hash else "confirming"),
             "record_hash": r.record_hash,
             "description": r.description,
             "created_at": r.created_at.isoformat() if r.created_at else None
@@ -215,6 +286,7 @@ def get_records(db: Session = Depends(get_db), current_user: User = Depends(get_
             "ipfs_file_name": r.ipfs_file_name,
             "ipfs_file_size": r.ipfs_file_size,
             "blockchain_tx_hash": r.blockchain_tx_hash,
+            "blockchain_status": r.blockchain_status or ("confirmed" if r.blockchain_tx_hash else "confirming"),
             "record_hash": r.record_hash,
             "description": r.description,
             "created_at": r.created_at.isoformat() if r.created_at else None
@@ -304,6 +376,30 @@ def download_record(record_id: int, db: Session = Depends(get_db), current_user:
             raise HTTPException(status_code=403, detail="No active consent from this patient")
     else:
         raise HTTPException(status_code=403, detail="Admins cannot download records")
+
+    # Check confirmation state before downloading
+    if record.blockchain_status == "confirming" and record.blockchain_tx_hash:
+        try:
+            receipt = blockchain_service.w3.eth.get_transaction_receipt(record.blockchain_tx_hash)
+            if receipt:
+                record.blockchain_status = "confirmed" if receipt.status == 1 else "failed"
+                db.commit()
+        except Exception:
+            pass
+
+    if record.blockchain_status == "confirming":
+        raise HTTPException(
+            status_code=409,
+            detail="Record anchoring is still confirming on Sepolia testnet. Please try again in a few seconds.",
+            headers={"X-Integrity-Verified": "false"}
+        )
+
+    if record.blockchain_status == "failed":
+        raise HTTPException(
+            status_code=409,
+            detail="Blockchain anchoring failed for this record on Sepolia. Integrity cannot be verified.",
+            headers={"X-Integrity-Verified": "false"}
+        )
 
     # 3. Fetch encrypted bytes from IPFS
     try:
