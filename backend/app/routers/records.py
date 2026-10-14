@@ -96,12 +96,11 @@ async def upload_record(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"IPFS upload failed: {str(e)}")
 
-    # Store IPFS metadata on-chain: only CID + hash + file metadata (never the file itself)
-    record_uuid = str(uuid.uuid4())
+    # Store IPFS metadata on-chain: key is cid so it can be retrieved from chain during download
     tx_hash = None
     try:
         tx_hash = blockchain_service.store_ipfs_record(
-            record_uuid,
+            cid,
             cid,
             original_hash,
             original_filename,
@@ -298,16 +297,30 @@ def download_record(record_id: int, db: Session = Depends(get_db), current_user:
     except Exception as e:
         raise HTTPException(status_code=500, detail="Failed to decrypt file — it may be corrupted.")
 
-    # 5. Integrity check: recompute SHA-256 and compare to on-chain hash stored in DB
+    # 5. On-Chain Integrity check: read hash directly from Sepolia blockchain via getIPFSRecord()
+    try:
+        on_chain_record = blockchain_service.get_ipfs_record(record.ipfs_cid)
+        on_chain_hash = on_chain_record.get("sha256_hash", "")
+        # Fallback to record ID if CID lookup returned empty hash
+        if not on_chain_hash:
+            fallback_record = blockchain_service.get_ipfs_record(str(record.id))
+            on_chain_hash = fallback_record.get("sha256_hash", "")
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"On-chain integrity verification failed: could not read record from Sepolia blockchain: {str(e)}"
+        )
+
     recomputed_hash = hashlib.sha256(decrypted_bytes).hexdigest()
-    integrity_ok = (record.record_hash is not None) and (recomputed_hash == record.record_hash)
+    # Verified: decrypted file matches on-chain hash anchored on Sepolia
+    integrity_ok = bool(on_chain_hash and recomputed_hash == on_chain_hash)
 
     file_name = record.ipfs_file_name or f"record_{record_id}"
 
     headers = {
         "Content-Disposition": f'attachment; filename="{file_name}"',
         "X-Integrity-Verified": "true" if integrity_ok else "false",
-        "X-Record-Hash": record.record_hash or "",
+        "X-Record-Hash": on_chain_hash or record.record_hash or "",
         "X-Recomputed-Hash": recomputed_hash,
         "X-IPFS-CID": record.ipfs_cid,
         "Access-Control-Expose-Headers": "X-Integrity-Verified, X-Record-Hash, X-Recomputed-Hash, X-IPFS-CID, Content-Disposition",
