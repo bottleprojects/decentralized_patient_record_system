@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { fetchApi } from '../lib/api';
 import { Activity, ShieldCheck, FileText, Lock, Loader2, AlertCircle } from 'lucide-react';
-import DemoBanner from '../components/DemoBanner';
 
 export default function Login() {
   const navigate = useNavigate();
@@ -136,7 +135,6 @@ export default function Login() {
             <p className="text-slate-500 mt-2">Please enter your details to sign in.</p>
           </div>
           
-          <DemoBanner className="mb-6" />
 
           {healthStatus && healthStatus.database_active === false && (
             <div className="bg-amber-50 text-amber-800 p-4 rounded-xl text-sm mb-6 border border-amber-200 shadow-sm flex gap-3">

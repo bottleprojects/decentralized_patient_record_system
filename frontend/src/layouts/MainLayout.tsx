@@ -1,8 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
-import { Shield, Activity, Users, FileText, LogOut, Clock, Loader2, KeyRound, Menu, X } from 'lucide-react';
+import { Shield, Activity, Users, FileText, LogOut, Clock, Loader2, KeyRound, Menu, X, Cpu } from 'lucide-react';
 import { fetchApi } from '../lib/api';
-import DemoBanner from '../components/DemoBanner';
 
 export default function MainLayout() {
   const navigate = useNavigate();
@@ -54,17 +53,27 @@ export default function MainLayout() {
   const renderNavLinks = () => {
     if (isAdmin) {
       return (
-        <Link to="/admin" className={`flex items-center gap-3 px-4 py-3 font-semibold rounded-lg transition-all ${location.pathname === '/admin' ? 'bg-blue-50 text-blue-700' : 'text-slate-600 hover:bg-slate-50 hover:text-blue-600'}`}>
-          <Shield className="w-5 h-5" /> Admin Console
-        </Link>
+        <>
+          <Link to="/admin" className={`flex items-center gap-3 px-4 py-3 font-semibold rounded-lg transition-all ${location.pathname === '/admin' ? 'bg-blue-50 text-blue-700' : 'text-slate-600 hover:bg-slate-50 hover:text-blue-600'}`}>
+            <Shield className="w-5 h-5" /> Admin Console
+          </Link>
+          <Link to="/analytics" className={`flex items-center gap-3 px-4 py-3 font-semibold rounded-lg transition-all ${location.pathname === '/analytics' ? 'bg-blue-50 text-blue-700' : 'text-slate-600 hover:bg-slate-50 hover:text-blue-600'}`}>
+            <Cpu className="w-5 h-5" /> Blockchain Analytics
+          </Link>
+        </>
       );
     }
     
     if (isDoctor) {
       return (
-        <Link to="/doctor" className={`flex items-center gap-3 px-4 py-3 font-semibold rounded-lg transition-all ${location.pathname === '/doctor' ? 'bg-blue-50 text-blue-700' : 'text-slate-600 hover:bg-slate-50 hover:text-blue-600'}`}>
-          <Users className="w-5 h-5" /> Patient Access
-        </Link>
+        <>
+          <Link to="/doctor" className={`flex items-center gap-3 px-4 py-3 font-semibold rounded-lg transition-all ${location.pathname === '/doctor' ? 'bg-blue-50 text-blue-700' : 'text-slate-600 hover:bg-slate-50 hover:text-blue-600'}`}>
+            <Users className="w-5 h-5" /> Patient Access
+          </Link>
+          <Link to="/analytics" className={`flex items-center gap-3 px-4 py-3 font-semibold rounded-lg transition-all ${location.pathname === '/analytics' ? 'bg-blue-50 text-blue-700' : 'text-slate-600 hover:bg-slate-50 hover:text-blue-600'}`}>
+            <Cpu className="w-5 h-5" /> Blockchain Analytics
+          </Link>
+        </>
       );
     }
     
@@ -79,6 +88,9 @@ export default function MainLayout() {
         <Link to="/patient/audit" className={`flex items-center gap-3 px-4 py-3 font-semibold rounded-lg transition-all ${location.pathname === '/patient/audit' ? 'bg-blue-50 text-blue-700' : 'text-slate-600 hover:bg-slate-50 hover:text-blue-600'}`}>
           <Clock className="w-5 h-5" /> Audit Trail
         </Link>
+        <Link to="/analytics" className={`flex items-center gap-3 px-4 py-3 font-semibold rounded-lg transition-all ${location.pathname === '/analytics' ? 'bg-blue-50 text-blue-700' : 'text-slate-600 hover:bg-slate-50 hover:text-blue-600'}`}>
+          <Cpu className="w-5 h-5" /> Blockchain Analytics
+        </Link>
       </>
     );
   };
@@ -90,6 +102,7 @@ export default function MainLayout() {
     if (location.pathname === '/doctor') return 'Clinical Workspace';
     if (location.pathname.includes('/doctor/patient')) return 'Patient Electronic Record';
     if (location.pathname === '/admin') return 'Administration Console';
+    if (location.pathname === '/analytics') return 'System Metrics & Blockchain Analytics';
     return 'DPRMS Portal';
   };
 
@@ -164,7 +177,6 @@ export default function MainLayout() {
         {/* Scrollable Content */}
         <div className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">
           <div className="max-w-6xl mx-auto pb-12">
-            <DemoBanner className="mb-6" />
             <Outlet />
           </div>
         </div>

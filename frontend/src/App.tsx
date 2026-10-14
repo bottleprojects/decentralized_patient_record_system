@@ -9,6 +9,7 @@ import PatientAudit from './pages/PatientAudit';
 import DoctorDashboard from './pages/DoctorDashboard';
 import DoctorPatientView from './pages/DoctorPatientView';
 import AdminDashboard from './pages/AdminDashboard';
+import MetricsAnalyticsPanel from './components/MetricsAnalyticsPanel';
 
 function App() {
   return (
@@ -25,6 +26,7 @@ function App() {
           <Route path="/patient/audit" element={<PatientAudit />} />
           <Route path="/doctor" element={<DoctorDashboard />} />
           <Route path="/doctor/patient/:id" element={<DoctorPatientView />} />
+          <Route path="/analytics" element={<MetricsAnalyticsPanel />} />
         </Route>
 
         {/* Fallback routing */}

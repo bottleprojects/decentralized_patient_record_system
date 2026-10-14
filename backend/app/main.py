@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from .database import engine, Base
-from .routers import users, records, consent, audit, clinical, fhir
+from .routers import users, records, consent, audit, clinical, fhir, metrics
 
 # Create database tables
 Base.metadata.create_all(bind=engine)
@@ -168,6 +168,7 @@ app.include_router(consent.router)
 app.include_router(audit.router)
 app.include_router(clinical.router)
 app.include_router(fhir.router)
+app.include_router(metrics.router)
 
 from fastapi import Depends
 from sqlalchemy.orm import Session

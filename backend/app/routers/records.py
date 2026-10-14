@@ -19,8 +19,8 @@ from ..services.rate_limiter import rate_limiter, get_client_ip
 MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "10"))
 IPFS_MAX_SIZE_BYTES = MAX_UPLOAD_MB * 1024 * 1024
 
-# Per-patient lifetime record cap for demo deployment
-MAX_RECORDS_PER_PATIENT = 25
+# Per-patient lifetime record cap (0 = unlimited; configurable via MAX_RECORDS_PER_PATIENT)
+MAX_RECORDS_PER_PATIENT = int(os.getenv("MAX_RECORDS_PER_PATIENT", "0"))
 
 # B0.3: Generic on-chain label — the real file name stays in the database only.
 _ONCHAIN_FILE_NAME_LABEL = "encrypted-record"
@@ -95,13 +95,14 @@ async def upload_record(
     else:
         raise HTTPException(status_code=403, detail="Admins cannot upload records")
 
-    # Enforce per-user upload cap
-    patient_record_count = db.query(MedicalRecord).filter(MedicalRecord.patient_id == patient_id).count()
-    if patient_record_count >= MAX_RECORDS_PER_PATIENT:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Patient upload cap reached: maximum {MAX_RECORDS_PER_PATIENT} records allowed per patient in this demo."
-        )
+    # Enforce per-user upload cap if configured
+    if MAX_RECORDS_PER_PATIENT > 0:
+        patient_record_count = db.query(MedicalRecord).filter(MedicalRecord.patient_id == patient_id).count()
+        if patient_record_count >= MAX_RECORDS_PER_PATIENT:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Patient upload cap reached: maximum {MAX_RECORDS_PER_PATIENT} records allowed per patient."
+            )
 
     # Enforce upload size limit BEFORE buffering full file into memory
     content_length = request.headers.get("content-length")

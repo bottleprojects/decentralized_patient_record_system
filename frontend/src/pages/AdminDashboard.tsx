@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ShieldAlert, Users, FileText, CheckCircle, LogOut, Trash2, KeyRound, Loader2, Database, Shield, X, CheckCircle2 } from 'lucide-react';
+import { ShieldAlert, Users, FileText, CheckCircle, LogOut, Trash2, KeyRound, Loader2, Database, Shield, X, CheckCircle2, Cpu } from 'lucide-react';
 import { fetchApi } from '../lib/api';
+import MetricsAnalyticsPanel from '../components/MetricsAnalyticsPanel';
 
 export default function AdminDashboard() {
   const [users, setUsers] = useState<any[]>([]);
@@ -142,7 +143,7 @@ export default function AdminDashboard() {
       )}
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
         <div 
           onClick={() => setActiveTab('users')}
           className={`medical-card p-5 cursor-pointer transition-all border-b-4 ${activeTab === 'users' ? 'border-b-blue-600 bg-blue-50/30' : 'border-b-transparent hover:border-b-slate-300'}`}
@@ -191,9 +192,28 @@ export default function AdminDashboard() {
             )}
           </h3>
         </div>
+
+        <div 
+          onClick={() => setActiveTab('analytics')}
+          className={`medical-card p-5 cursor-pointer transition-all border-b-4 ${activeTab === 'analytics' ? 'border-b-indigo-600 bg-indigo-50/30' : 'border-b-transparent hover:border-b-slate-300'}`}
+        >
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Analytics & Gas</p>
+            <Cpu className={`w-5 h-5 ${activeTab === 'analytics' ? 'text-indigo-600' : 'text-slate-400'}`} />
+          </div>
+          <h3 className="text-2xl font-bold text-slate-800 flex items-center gap-1.5">
+            <span>Metrics</span>
+            <span className="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-1.5 py-0.5 rounded">Live</span>
+          </h3>
+        </div>
       </div>
 
       <div className="medical-card overflow-hidden">
+        {activeTab === 'analytics' && (
+          <div className="p-6">
+            <MetricsAnalyticsPanel />
+          </div>
+        )}
         
         {/* Table Content */}
         {activeTab === 'users' && (
