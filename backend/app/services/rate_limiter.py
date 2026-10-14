@@ -47,8 +47,15 @@ rate_limiter = InMemoryRateLimiter()
 
 
 def get_client_ip(request: Request) -> str:
-    """Extract client IP respecting X-Forwarded-For headers from reverse proxies."""
-    forwarded = request.headers.get("x-forwarded-for")
+    """
+    Extract real client IP respecting X-Forwarded-For headers from reverse proxies (e.g. Render).
+    Behind Render, the leftmost IP in X-Forwarded-For is the original client IP.
+    """
+    forwarded = request.headers.get("x-forwarded-for") or request.headers.get("X-Forwarded-For")
     if forwarded:
-        return forwarded.split(",")[0].strip()
-    return request.client.host if request.client else "unknown"
+        client_ip = forwarded.split(",")[0].strip()
+        if client_ip:
+            return client_ip
+    if request.client and request.client.host:
+        return request.client.host
+    return "unknown"
