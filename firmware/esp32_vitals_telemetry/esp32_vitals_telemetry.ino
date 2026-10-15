@@ -20,8 +20,8 @@
  * --------------------------------------------------------------------------------------
  * 
  * REQUIRED ARDUINO LIBRARIES (Install via Arduino Library Manager):
- * - "SparkFun MAX3010x Pulse and Proximity Sensor Library" by SparkFun Electronics
- *   (WiFi, HTTPClient, and Wire are already built-in to the ESP32 board package)
+ * 1. "SparkFun MAX3010x Pulse and Proximity Sensor Library" by SparkFun Electronics
+ * 2. "ArduinoJson" by Benoît Blanchon (Version 6.x or 7.x)
  * ======================================================================================
  */
 
@@ -31,6 +31,7 @@
 #include <Wire.h>
 #include "MAX30105.h"
 #include "heartRate.h"
+#include <ArduinoJson.h>
 
 // ==========================================
 // 1. CONFIGURATION (CUSTOMIZE THESE VALUES)
@@ -206,21 +207,24 @@ void sendTelemetry(bool fingerDetected, long irValue, bool leadsOff, int hr, int
 
   http.addHeader("Content-Type", "application/json");
 
-  // Construct JSON payload directly (zero external library dependency)
-  String requestBody = "{";
-  requestBody += "\"device_id\":\"" + String(DEVICE_ID) + "\",";
-  requestBody += "\"finger_detected\":" + String(fingerDetected ? "true" : "false") + ",";
-  requestBody += "\"ir_value\":" + String(irValue) + ",";
-  requestBody += "\"leads_off\":" + String(leadsOff ? "true" : "false") + ",";
-  requestBody += "\"heart_rate\":" + String((hr > 0) ? hr : 0) + ",";
-  requestBody += "\"spo2\":" + String((spo2 > 0) ? spo2 : 0) + ",";
-  requestBody += "\"ecg_samples\":[";
+  // Construct JSON payload
+  StaticJsonDocument<512> doc;
+  doc["device_id"] = DEVICE_ID;
+  doc["finger_detected"] = fingerDetected;
+  doc["ir_value"] = irValue;
+  doc["leads_off"] = leadsOff;
+  doc["heart_rate"] = (hr > 0) ? hr : 0;
+  doc["spo2"] = (spo2 > 0) ? spo2 : 0;
+
+  // Add recent ECG sample array
+  JsonArray ecgArray = doc.createNestedArray("ecg_samples");
   for (int i = 0; i < ECG_BUFFER_SIZE; i++) {
     int idx = (ecgSampleIndex + i) % ECG_BUFFER_SIZE;
-    requestBody += String(ecgSamples[idx]);
-    if (i < ECG_BUFFER_SIZE - 1) requestBody += ",";
+    ecgArray.add(ecgSamples[idx]);
   }
-  requestBody += "]}";
+
+  String requestBody;
+  serializeJson(doc, requestBody);
 
   int httpResponseCode = http.POST(requestBody);
 
