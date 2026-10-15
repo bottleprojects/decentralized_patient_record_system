@@ -14,6 +14,8 @@ router = APIRouter(prefix="/clinical", tags=["clinical"])
 
 # --- In-Memory IoT Telemetry Store ---
 _telemetry_lock = threading.Lock()
+_active_telemetry_mode = "BOTH"  # Options: "BOTH", "ECG_ONLY", "SPO2_ONLY"
+
 LATEST_TELEMETRY = {
     "device_id": "ESP32-VITALS-01",
     "finger_detected": False,
@@ -22,6 +24,7 @@ LATEST_TELEMETRY = {
     "heart_rate": 0,
     "spo2": 0,
     "ecg_samples": [],
+    "mode": "BOTH",
     "timestamp": None,
     "received_at": None,
 }
@@ -29,6 +32,7 @@ LATEST_TELEMETRY = {
 
 def update_telemetry(payload: dict):
     """Thread-safe update of latest IoT telemetry packet."""
+    global _active_telemetry_mode
     with _telemetry_lock:
         for k in ["device_id", "finger_detected", "ir_value", "leads_off", "heart_rate", "spo2", "ecg_samples"]:
             if k in payload:
@@ -36,6 +40,7 @@ def update_telemetry(payload: dict):
         now = time.time()
         LATEST_TELEMETRY["received_at"] = now
         LATEST_TELEMETRY["timestamp"] = payload.get("timestamp") or datetime.utcnow().isoformat() + "Z"
+        LATEST_TELEMETRY["mode"] = _active_telemetry_mode
 
 
 # --- Pydantic Models ---
@@ -48,6 +53,9 @@ class TelemetryIngest(BaseModel):
     spo2: Optional[int] = 0
     ecg_samples: Optional[List[int]] = []
     timestamp: Optional[str] = None
+
+class TelemetryModeUpdate(BaseModel):
+    mode: str = "BOTH"  # "BOTH", "ECG_ONLY", "SPO2_ONLY"
 class PrescriptionCreate(BaseModel):
     patient_id: int
     medication_name: str
@@ -157,14 +165,35 @@ def get_patient_data(db: Session = Depends(get_db), current_user: User = Depends
 
 
 # --- IoT Telemetry Endpoints ---
+@router.post("/telemetry/mode", status_code=status.HTTP_200_OK)
+def set_telemetry_mode(data: TelemetryModeUpdate):
+    """Update active telemetry acquisition mode: BOTH, ECG_ONLY, or SPO2_ONLY."""
+    global _active_telemetry_mode
+    mode = data.mode.upper().strip()
+    if mode in {"BOTH", "ECG_ONLY", "SPO2_ONLY"}:
+        with _telemetry_lock:
+            _active_telemetry_mode = mode
+            LATEST_TELEMETRY["mode"] = mode
+    return {"status": "ok", "mode": _active_telemetry_mode}
+
+
+@router.get("/telemetry/mode")
+def get_telemetry_mode():
+    """Retrieve active telemetry acquisition mode."""
+    with _telemetry_lock:
+        return {"mode": _active_telemetry_mode}
+
+
 @router.post("/telemetry/ingest", status_code=status.HTTP_200_OK)
 def ingest_telemetry(data: TelemetryIngest):
     """
     Ingest live telemetry packet from ESP32 vitals sensor.
-    Unauthenticated to allow fast, lightweight push from microcontrollers over Wi-Fi.
+    Returns status and current target mode to the microcontroller.
     """
     update_telemetry(data.dict())
-    return {"status": "ok", "message": "Telemetry received"}
+    with _telemetry_lock:
+        current_mode = _active_telemetry_mode
+    return {"status": "ok", "mode": current_mode}
 
 
 @router.get("/telemetry/latest")
@@ -195,6 +224,7 @@ def get_latest_telemetry(current_user: User = Depends(get_current_user)):
         "heart_rate": data.get("heart_rate", 0),
         "spo2": data.get("spo2", 0),
         "ecg_samples": data.get("ecg_samples", []),
+        "mode": data.get("mode", "BOTH"),
         "timestamp": data.get("timestamp"),
         "patient_id": current_user.id,
         "patient_name": current_user.full_name,

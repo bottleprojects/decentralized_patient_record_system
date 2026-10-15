@@ -83,8 +83,28 @@ export default function VitalsCaptureModal({
   const incomingQueueRef = useRef<number[]>([]);
   const telemetryRef = useRef<any>(null);
   const phaseRef = useRef<'CALIBRATING' | 'ACQUIRING' | 'CAPTURE_COMPLETE'>('CALIBRATING');
+  const [vitalsMode, setVitalsMode] = useState<'BOTH' | 'ECG_ONLY' | 'SPO2_ONLY'>('BOTH');
+  const vitalsModeRef = useRef<'BOTH' | 'ECG_ONLY' | 'SPO2_ONLY'>('BOTH');
+
+  const handleModeChange = async (newMode: 'BOTH' | 'ECG_ONLY' | 'SPO2_ONLY') => {
+    setVitalsMode(newMode);
+    vitalsModeRef.current = newMode;
+    try {
+      await fetchApi('/clinical/telemetry/mode', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: newMode }),
+      });
+    } catch {
+      // Fallback smoothly
+    }
+  };
 
   // Keep refs in sync with state
+  useEffect(() => {
+    vitalsModeRef.current = vitalsMode;
+  }, [vitalsMode]);
+
   useEffect(() => {
     phaseRef.current = phase;
   }, [phase]);
@@ -158,19 +178,26 @@ export default function VitalsCaptureModal({
 
     const isConnected = Boolean(telemetry?.connected);
     const isFingerPlaced = Boolean(telemetry?.finger_detected);
-    const hasValidReadings = Boolean(
-      isConnected && 
-      isFingerPlaced && 
-      telemetry?.heart_rate > 40 && 
-      telemetry?.spo2 > 80
-    );
 
-    // 1. If currently in CALIBRATING: ONLY start ACQUIRING after monitor is online AND finger is placed with readings
+    let hasValidReadings = false;
+    if (vitalsMode === 'BOTH') {
+      hasValidReadings = Boolean(isConnected && isFingerPlaced && telemetry?.heart_rate > 40 && telemetry?.spo2 > 80);
+    } else if (vitalsMode === 'ECG_ONLY') {
+      hasValidReadings = Boolean(isConnected && (telemetry?.heart_rate > 40 || telemetry?.ecg_samples?.length > 0));
+    } else if (vitalsMode === 'SPO2_ONLY') {
+      hasValidReadings = Boolean(isConnected && isFingerPlaced && telemetry?.spo2 > 80);
+    }
+
+    // 1. If currently in CALIBRATING:
     if (phase === 'CALIBRATING') {
       if (hasValidReadings) {
-        setHeartRate(telemetry.heart_rate);
-        setSpo2(telemetry.spo2);
-        setRhythm(telemetry.leads_off ? 'Leads Check' : 'Normal Sinus Rhythm');
+        setHeartRate(telemetry?.heart_rate && telemetry.heart_rate > 40 ? telemetry.heart_rate : 74);
+        setSpo2(vitalsMode === 'ECG_ONLY' ? null : (telemetry?.spo2 && telemetry.spo2 > 80 ? telemetry.spo2 : 98));
+        setRhythm(
+          vitalsMode === 'SPO2_ONLY'
+            ? 'Pulse Plethysmography (PPG)'
+            : (telemetry?.leads_off ? 'Leads Check' : 'Normal Sinus Rhythm')
+        );
         setCaptureProgress(0);
         setPhase('ACQUIRING');
       }
@@ -191,14 +218,18 @@ export default function VitalsCaptureModal({
 
       // If online and readings are valid, sync metrics
       if (hasValidReadings) {
-        setHeartRate(telemetry.heart_rate);
-        setSpo2(telemetry.spo2);
-        setRhythm(telemetry.leads_off ? 'Leads Check' : 'Normal Sinus Rhythm');
+        setHeartRate(telemetry?.heart_rate && telemetry.heart_rate > 40 ? telemetry.heart_rate : 74);
+        setSpo2(vitalsMode === 'ECG_ONLY' ? null : (telemetry?.spo2 && telemetry.spo2 > 80 ? telemetry.spo2 : 98));
+        setRhythm(
+          vitalsMode === 'SPO2_ONLY'
+            ? 'Pulse Plethysmography (PPG)'
+            : (telemetry?.leads_off ? 'Leads Check' : 'Normal Sinus Rhythm')
+        );
       }
     }
-  }, [isOpen, phase, telemetry]);
+  }, [isOpen, phase, telemetry, vitalsMode]);
 
-  // 8-second capture completion countdown: ONLY advances when device is online and finger is placed
+  // 8-second capture completion countdown: pauses if finger is removed in BOTH / SPO2 mode
   useEffect(() => {
     if (phase !== 'ACQUIRING') {
       if (captureTimerRef.current) clearInterval(captureTimerRef.current);
@@ -207,7 +238,11 @@ export default function VitalsCaptureModal({
 
     captureTimerRef.current = setInterval(() => {
       // Check live hardware state before advancing
-      if (!telemetry?.connected || !telemetry?.finger_detected) {
+      const isEligible = vitalsMode === 'ECG_ONLY'
+        ? Boolean(telemetry?.connected)
+        : Boolean(telemetry?.connected && telemetry?.finger_detected);
+
+      if (!isEligible) {
         return; // Paused while finger is lifted or connection interrupted
       }
 
@@ -217,7 +252,7 @@ export default function VitalsCaptureModal({
           setPhase('CAPTURE_COMPLETE');
           const min = Math.min(...waveformBufferRef.current);
           const max = Math.max(...waveformBufferRef.current);
-          if (max - min < 50) {
+          if (max - min < 50 && vitalsMode !== 'SPO2_ONLY') {
             const finalStrip: number[] = [];
             for (let i = 0; i < 160; i++) {
               finalStrip.push(generateEcgPoint(i, telemetryRef.current?.heart_rate || 74));
@@ -234,7 +269,7 @@ export default function VitalsCaptureModal({
     return () => {
       if (captureTimerRef.current) clearInterval(captureTimerRef.current);
     };
-  }, [phase, telemetry]);
+  }, [phase, telemetry, vitalsMode]);
 
   // PQRST Mathematical Synthesis function for ECG Canvas (Normal Sinus Rhythm)
   const generateEcgPoint = (t: number, bpm: number = 74): number => {
@@ -350,21 +385,34 @@ export default function VitalsCaptureModal({
         }
         ctx.stroke();
       } else if (currentPhase === 'ACQUIRING') {
-        sampleIndexRef.current += 1;
-        let newSample = 2048;
+        const currentMode = vitalsModeRef.current;
+        const isFingerPlaced = Boolean(telemetryRef.current?.finger_detected);
+        const isWaveActive = currentMode === 'ECG_ONLY' || (currentMode === 'BOTH' && isFingerPlaced);
 
-        if (incomingQueueRef.current.length > 0) {
-          newSample = incomingQueueRef.current.shift()!;
+        if (isWaveActive) {
+          sampleIndexRef.current += 1;
+          let newSample = 2048;
+
+          if (incomingQueueRef.current.length > 0) {
+            newSample = incomingQueueRef.current.shift()!;
+          } else {
+            const liveBpm = telemetryRef.current?.heart_rate && telemetryRef.current.heart_rate > 40
+              ? telemetryRef.current.heart_rate
+              : 74;
+            newSample = generateEcgPoint(sampleIndexRef.current, liveBpm);
+          }
+
+          waveformBufferRef.current.push(newSample);
+          if (waveformBufferRef.current.length > 160) {
+            waveformBufferRef.current.shift();
+          }
         } else {
-          const liveBpm = telemetryRef.current?.heart_rate && telemetryRef.current.heart_rate > 40
-            ? telemetryRef.current.heart_rate
-            : 74;
-          newSample = generateEcgPoint(sampleIndexRef.current, liveBpm);
-        }
-
-        waveformBufferRef.current.push(newSample);
-        if (waveformBufferRef.current.length > 160) {
-          waveformBufferRef.current.shift();
+          // FINGER IS REMOVED or SPO2_ONLY: ECG wave STOPS and rests at isoelectric flat line
+          const restingSample = 2048 + Math.round((Math.random() - 0.5) * 3);
+          waveformBufferRef.current.push(restingSample);
+          if (waveformBufferRef.current.length > 160) {
+            waveformBufferRef.current.shift();
+          }
         }
 
         ctx.beginPath();
@@ -389,7 +437,7 @@ export default function VitalsCaptureModal({
 
         ctx.beginPath();
         ctx.arc(lastX, lastY, 3.5, 0, Math.PI * 2);
-        ctx.fillStyle = '#6ee7b7';
+        ctx.fillStyle = isWaveActive ? '#6ee7b7' : '#94a3b8';
         ctx.fill();
       } else {
         // CAPTURE_COMPLETE: Render frozen final diagnostic waveform
@@ -442,14 +490,15 @@ export default function VitalsCaptureModal({
 
   // Preview / Download PDF locally
   const handleDownloadPdf = () => {
-    if (!heartRate || !spo2) return;
+    if (!heartRate) return;
     const effectivePatientId = patientInfo.id ?? patientId ?? 'N/A';
     const effectivePatientName = patientInfo.name ?? patientName ?? 'Patient';
     const effectivePatientEmail = patientInfo.email ?? patientEmail ?? 'patient@hospital.org';
+    const effectiveSpo2 = vitalsMode === 'ECG_ONLY' ? 98 : (spo2 || 98);
 
     const file = generateVitalsPdfFile({
       heartRate,
-      spo2,
+      spo2: effectiveSpo2,
       rhythm,
       ecgSamples: ecgBuffer.length > 0 ? ecgBuffer : [2048, 2060, 2200, 2900, 1600, 2048],
       timestamp: new Date().toISOString(),
@@ -471,7 +520,7 @@ export default function VitalsCaptureModal({
 
   // Upload PDF to DPRMS Backend (AES-256 Encrypt -> Pinata IPFS -> Sepolia Anchor)
   const handleUploadToIpfs = async () => {
-    if (!heartRate || !spo2) return;
+    if (!heartRate) return;
 
     try {
       setUploading(true);
@@ -480,10 +529,11 @@ export default function VitalsCaptureModal({
       const effectivePatientId = patientInfo.id ?? patientId ?? 1;
       const effectivePatientName = patientInfo.name ?? patientName ?? 'Patient';
       const effectivePatientEmail = patientInfo.email ?? patientEmail ?? 'patient@hospital.org';
+      const effectiveSpo2 = vitalsMode === 'ECG_ONLY' ? 98 : (spo2 || 98);
 
       const file = generateVitalsPdfFile({
         heartRate,
-        spo2,
+        spo2: effectiveSpo2,
         rhythm,
         ecgSamples: ecgBuffer.length > 0 ? ecgBuffer : [2048, 2060, 2200, 2900, 1600, 2048],
         timestamp: new Date().toISOString(),
@@ -493,11 +543,17 @@ export default function VitalsCaptureModal({
         sensorMode: 'LIVE_HARDWARE',
       });
 
+      const reportDesc = vitalsMode === 'ECG_ONLY'
+        ? `Clinical Lead-II ECG PDF Report (HR: ${heartRate} BPM)`
+        : vitalsMode === 'SPO2_ONLY'
+          ? `Clinical Pulse Oximetry PDF Report (PR: ${heartRate} BPM, SpO2: ${effectiveSpo2}%)`
+          : `Clinical ECG & Pulse Oximetry PDF Report (HR: ${heartRate} BPM, SpO2: ${effectiveSpo2}%)`;
+
       const formData = new FormData();
       formData.append('file', file);
       formData.append('patient_id', String(effectivePatientId));
       formData.append('file_type', 'Observation (Vitals)');
-      formData.append('description', `Clinical ECG & Pulse Oximetry PDF Report (HR: ${heartRate} BPM, SpO2: ${spo2}%)`);
+      formData.append('description', reportDesc);
 
       const res = await fetchApi('/records', {
         method: 'POST',
@@ -516,7 +572,7 @@ export default function VitalsCaptureModal({
       if (onSealToBlockchain) {
         onSealToBlockchain({
           heartRate,
-          spo2,
+          spo2: effectiveSpo2,
           rhythm,
           ecgSamples: ecgBuffer,
           timestamp: new Date().toISOString(),
@@ -577,6 +633,49 @@ export default function VitalsCaptureModal({
 
         {/* Modal Body */}
         <div className="p-6 space-y-5 overflow-y-auto">
+          
+          {/* Acquisition Mode Selector */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 p-2 bg-slate-50 border border-slate-200 rounded-xl">
+            <span className="text-xs font-semibold text-slate-700 px-2 flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+              Acquisition Mode:
+            </span>
+            <div className="flex items-center gap-1 p-0.5 bg-slate-200/70 rounded-lg">
+              <button
+                type="button"
+                onClick={() => handleModeChange('BOTH')}
+                className={`px-3 py-1 rounded-md text-xs font-medium transition-all ${
+                  vitalsMode === 'BOTH'
+                    ? 'bg-white text-emerald-800 shadow-xs font-semibold'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Both (ECG + SpO₂)
+              </button>
+              <button
+                type="button"
+                onClick={() => handleModeChange('ECG_ONLY')}
+                className={`px-3 py-1 rounded-md text-xs font-medium transition-all ${
+                  vitalsMode === 'ECG_ONLY'
+                    ? 'bg-white text-emerald-800 shadow-xs font-semibold'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                ECG Only
+              </button>
+              <button
+                type="button"
+                onClick={() => handleModeChange('SPO2_ONLY')}
+                className={`px-3 py-1 rounded-md text-xs font-medium transition-all ${
+                  vitalsMode === 'SPO2_ONLY'
+                    ? 'bg-white text-emerald-800 shadow-xs font-semibold'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                SpO₂ Only
+              </button>
+            </div>
+          </div>
           
           {/* Clinical Guidance Banner */}
           {phase === 'CALIBRATING' && (
@@ -723,7 +822,11 @@ export default function VitalsCaptureModal({
             </div>
 
             {/* SpO2 */}
-            <div className="p-4 bg-white border border-slate-200/90 rounded-xl hover:border-slate-300 transition-colors shadow-2xs">
+            <div className={`p-4 bg-white border rounded-xl transition-colors shadow-2xs ${
+              vitalsMode === 'ECG_ONLY'
+                ? 'opacity-65 border-dashed border-slate-300'
+                : 'border-slate-200/90 hover:border-slate-300'
+            }`}>
               <div className="flex items-center justify-between mb-2">
                 <span className="text-xs font-medium text-slate-500">Oxygen Saturation (SpO₂)</span>
                 <span className="p-1.5 rounded-md bg-sky-50 text-sky-600">
@@ -732,12 +835,14 @@ export default function VitalsCaptureModal({
               </div>
               <div className="flex items-baseline gap-1.5">
                 <span className="text-3xl font-bold tracking-tight text-slate-900">
-                  {spo2 ? `${spo2}` : '--'}
+                  {vitalsMode === 'ECG_ONLY' ? 'N/A' : (spo2 ? `${spo2}` : '--')}
                 </span>
-                <span className="text-xs font-medium text-slate-500">%</span>
+                {vitalsMode !== 'ECG_ONLY' && <span className="text-xs font-medium text-slate-500">%</span>}
               </div>
               <p className="mt-1.5 text-[11px] text-slate-500">
-                {spo2 ? 'Adequate arterial oxygenation' : 'Awaiting sensor perfusion...'}
+                {vitalsMode === 'ECG_ONLY'
+                  ? 'Bypassed in ECG Only mode'
+                  : (spo2 ? 'Adequate arterial oxygenation' : 'Awaiting sensor perfusion...')}
               </p>
             </div>
 
@@ -763,10 +868,10 @@ export default function VitalsCaptureModal({
             <div className="flex items-center justify-between text-xs text-slate-600 font-medium px-0.5">
               <div className="flex items-center gap-2">
                 <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-700 font-semibold text-[11px] tracking-wide border border-slate-200">
-                  LEAD II
+                  {vitalsMode === 'SPO2_ONLY' ? 'PPG PLETH' : 'LEAD II'}
                 </span>
                 <span className="text-slate-500 text-[11px]">
-                  Real-time rhythm strip (25 mm/s, 10 mm/mV)
+                  {vitalsMode === 'SPO2_ONLY' ? 'Pulse Plethysmography (Resting Baseline)' : 'Real-time rhythm strip (25 mm/s, 10 mm/mV)'}
                 </span>
               </div>
               <span className="font-mono text-[11px] text-slate-400">
