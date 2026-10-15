@@ -119,66 +119,86 @@ export default function VitalsCaptureModal({
     };
 
     pollTelemetry();
-    const interval = setInterval(pollTelemetry, 1000);
+    const interval = setInterval(pollTelemetry, 600);
     return () => {
       isMounted = false;
       clearInterval(interval);
     };
   }, [isOpen]);
 
-  // Signal Sync: Transition to ACQUIRING once valid telemetry arrives from ESP32
+  // STRICT CONNECTION & SENSOR GATING
   useEffect(() => {
-    if (!isOpen || phase !== 'CALIBRATING') return;
+    if (!isOpen) return;
 
-    const hasLiveValidHardware = Boolean(
-      telemetry?.connected && 
-      telemetry?.finger_detected && 
+    const isConnected = Boolean(telemetry?.connected);
+    const isFingerPlaced = Boolean(telemetry?.finger_detected);
+    const hasValidReadings = Boolean(
+      isConnected && 
+      isFingerPlaced && 
       telemetry?.heart_rate > 40 && 
-      telemetry?.heart_rate < 200 && 
       telemetry?.spo2 > 80
     );
 
-    if (hasLiveValidHardware) {
-      setHeartRate(telemetry.heart_rate);
-      setSpo2(telemetry.spo2);
-      setRhythm(telemetry.leads_off ? 'Leads Off - Reattaching' : 'Normal Sinus Rhythm');
-      setPhase('ACQUIRING');
+    // 1. If currently in CALIBRATING: ONLY start ACQUIRING after monitor is online AND finger is placed with readings
+    if (phase === 'CALIBRATING') {
+      if (hasValidReadings) {
+        setHeartRate(telemetry.heart_rate);
+        setSpo2(telemetry.spo2);
+        setRhythm(telemetry.leads_off ? 'Leads Check' : 'Normal Sinus Rhythm');
+        setCaptureProgress(0);
+        setPhase('ACQUIRING');
+      }
+      return;
+    }
+
+    // 2. If in ACQUIRING:
+    if (phase === 'ACQUIRING') {
+      // If monitor goes offline, abort recording and return to CALIBRATING
+      if (!isConnected) {
+        setPhase('CALIBRATING');
+        setCaptureProgress(0);
+        setHeartRate(null);
+        setSpo2(null);
+        setEcgBuffer([]);
+        return;
+      }
+
+      // If online and readings are valid, sync metrics
+      if (hasValidReadings) {
+        setHeartRate(telemetry.heart_rate);
+        setSpo2(telemetry.spo2);
+        setRhythm(telemetry.leads_off ? 'Leads Check' : 'Normal Sinus Rhythm');
+      }
     }
   }, [isOpen, phase, telemetry]);
 
-  // Live telemetry synchronization during acquisition
+  // 8-second capture completion countdown: ONLY advances when device is online and finger is placed
   useEffect(() => {
-    if (phase !== 'ACQUIRING' || !telemetry) return;
-    if (telemetry.heart_rate && telemetry.heart_rate > 40) {
-      setHeartRate(telemetry.heart_rate);
-    }
-    if (telemetry.spo2 && telemetry.spo2 > 80) {
-      setSpo2(telemetry.spo2);
-    }
-    if (telemetry.leads_off !== undefined) {
-      setRhythm(telemetry.leads_off ? 'Leads Disconnected' : 'Normal Sinus Rhythm');
-    }
-  }, [phase, telemetry]);
-
-  // 8-second capture completion countdown once valid vitals are streaming
-  useEffect(() => {
-    if (phase === 'ACQUIRING') {
-      captureTimerRef.current = setInterval(() => {
-        setCaptureProgress(prev => {
-          if (prev >= 8) {
-            setPhase('CAPTURE_COMPLETE');
-            return 8;
-          }
-          return prev + 1;
-        });
-      }, 1000);
-    } else {
+    if (phase !== 'ACQUIRING') {
       if (captureTimerRef.current) clearInterval(captureTimerRef.current);
+      return;
     }
+
+    captureTimerRef.current = setInterval(() => {
+      // Check live hardware state before advancing
+      if (!telemetry?.connected || !telemetry?.finger_detected) {
+        return; // Paused while finger is lifted or connection interrupted
+      }
+
+      setCaptureProgress(prev => {
+        const next = prev + 1;
+        if (next >= 8) {
+          setPhase('CAPTURE_COMPLETE');
+          return 8;
+        }
+        return next;
+      });
+    }, 1000);
+
     return () => {
       if (captureTimerRef.current) clearInterval(captureTimerRef.current);
     };
-  }, [phase]);
+  }, [phase, telemetry]);
 
   // PQRST Mathematical Synthesis function for ECG Canvas (75 BPM Normal Sinus Rhythm)
   const generateEcgPoint = (t: number): number => {
@@ -525,19 +545,29 @@ export default function VitalsCaptureModal({
           )}
 
           {phase === 'ACQUIRING' && (
-            <div className="bg-emerald-50/70 border border-emerald-200 rounded-xl p-4 flex items-center justify-between text-xs sm:text-sm">
+            <div className={`p-4 rounded-xl flex items-center justify-between text-xs sm:text-sm border transition-colors ${
+              telemetry?.finger_detected 
+                ? 'bg-emerald-50/70 border-emerald-200 text-emerald-950' 
+                : 'bg-amber-50 border-amber-200 text-amber-950'
+            }`}>
               <div className="flex items-center gap-3">
-                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                <span className={`w-2.5 h-2.5 rounded-full ${
+                  telemetry?.finger_detected ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500 animate-ping'
+                }`}></span>
                 <div>
-                  <h4 className="font-semibold text-emerald-950 text-xs sm:text-sm">
-                    Recording Diagnostic Window
+                  <h4 className="font-semibold text-xs sm:text-sm">
+                    {telemetry?.finger_detected 
+                      ? 'Recording Diagnostic Window' 
+                      : 'Recording Paused — Awaiting Sensor Contact'}
                   </h4>
-                  <p className="text-emerald-700 text-xs mt-0.5">
-                    Capturing continuous 8-second physiological rhythm. Keep patient resting comfortably.
+                  <p className="text-xs mt-0.5 opacity-80">
+                    {telemetry?.finger_detected
+                      ? 'Capturing continuous 8-second physiological rhythm. Keep patient resting comfortably.'
+                      : 'Sensor contact lost. Please place patient index finger back on the sensor to resume.'}
                   </p>
                 </div>
               </div>
-              <span className="font-mono text-xs font-semibold px-2.5 py-1 rounded-md bg-white text-emerald-800 border border-emerald-200 shadow-2xs">
+              <span className="font-mono text-xs font-semibold px-2.5 py-1 rounded-md bg-white border border-slate-200 shadow-2xs">
                 {captureProgress}s / 8s
               </span>
             </div>

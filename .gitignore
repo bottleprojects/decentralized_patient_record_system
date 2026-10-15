@@ -16,3 +16,5 @@ coverage/
 test.json
 *.db
 .DS_Store
+*.ino
+firmware/
