@@ -239,26 +239,6 @@ export default function PatientDashboard() {
           <button 
             onClick={async () => {
               try {
-                const bundle = await fetchApi(`/fhir/v4/Observation?patient=${user.id}`);
-                const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' });
-                const url = window.URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `fhir_observations_${user.id}.json`;
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-              } catch (e: any) {
-                alert("Failed to export FHIR data: " + e.message);
-              }
-            }}
-            className="w-full sm:w-auto btn-secondary flex items-center justify-center gap-2 text-sm"
-          >
-            <Download className="w-4 h-4" /> Export FHIR
-          </button>
-          <button 
-            onClick={async () => {
-              try {
                 const data = await fetchApi('/records/export');
                 const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
                 const url = window.URL.createObjectURL(blob);
