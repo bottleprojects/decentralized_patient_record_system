@@ -279,8 +279,9 @@ export default function PatientDashboard() {
           <button 
             onClick={() => setIsVitalsModalOpen(true)}
             className="w-full sm:w-auto btn-rose flex items-center justify-center gap-2 text-sm"
+            title="Take ECG & Pulse Oximetry (MAX30102 / AD8232)"
           >
-            <Activity className="w-4 h-4 animate-pulse" /> Take ECG & Pulse Oximetry (MAX30102 / AD8232)
+            <Activity className="w-4 h-4 animate-pulse" /> Take Vitals
           </button>
           <button onClick={() => setIsUploadModalOpen(true)} className="w-full sm:w-auto btn-primary flex items-center justify-center gap-2 text-sm">
             <Upload className="w-4 h-4" /> Upload Record
