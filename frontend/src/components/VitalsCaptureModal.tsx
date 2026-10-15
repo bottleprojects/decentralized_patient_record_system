@@ -50,13 +50,12 @@ export default function VitalsCaptureModal({
   patientEmail,
   onSealToBlockchain,
 }: VitalsCaptureModalProps) {
-  // Main phase: CALIBRATING (listening for hardware / 5s auto fallback) -> ACQUIRING (8s recording) -> CAPTURE_COMPLETE
+  // Main phase: CALIBRATING (listening for hardware) -> ACQUIRING (8s recording) -> CAPTURE_COMPLETE
   const [phase, setPhase] = useState<'CALIBRATING' | 'ACQUIRING' | 'CAPTURE_COMPLETE'>('CALIBRATING');
   
   // Hardware & Calibration states
   const [telemetry, setTelemetry] = useState<any>(null);
-  const [sensorMode, setSensorMode] = useState<'WAITING' | 'LIVE_HARDWARE' | 'CALIBRATED_FALLBACK'>('WAITING');
-  const [calibrationSeconds, setCalibrationSeconds] = useState(0); // 0 to 5s auto-fallback timer
+  const [sensorMode, setSensorMode] = useState<'WAITING' | 'LIVE_HARDWARE'>('WAITING');
   
   // Real-time clinical numbers
   const [heartRate, setHeartRate] = useState<number | null>(null);
@@ -91,7 +90,6 @@ export default function VitalsCaptureModal({
       setSensorMode('WAITING');
       setHeartRate(null);
       setSpo2(null);
-      setCalibrationSeconds(0);
       setCaptureProgress(0);
       setEcgBuffer([]);
       setUploadResult(null);
@@ -132,17 +130,16 @@ export default function VitalsCaptureModal({
     };
   }, [isOpen]);
 
-  // Calibration Window: Listen for real hardware; if none detected within 5s, automatically acquire believable vitals
+  // Signal Sync: Transition to ACQUIRING once valid telemetry arrives from ESP32
   useEffect(() => {
     if (!isOpen || phase !== 'CALIBRATING') return;
 
-    // Check if live ESP32 is streaming valid physiological data
     const hasLiveValidHardware = Boolean(
       telemetry?.connected && 
       telemetry?.finger_detected && 
-      telemetry?.heart_rate > 45 && 
-      telemetry?.heart_rate < 180 && 
-      telemetry?.spo2 > 85
+      telemetry?.heart_rate > 40 && 
+      telemetry?.heart_rate < 200 && 
+      telemetry?.spo2 > 80
     );
 
     if (hasLiveValidHardware) {
@@ -151,43 +148,22 @@ export default function VitalsCaptureModal({
       setSpo2(telemetry.spo2);
       setRhythm(telemetry.leads_off ? 'Leads Off - Reattaching' : 'Normal Sinus Rhythm');
       setPhase('ACQUIRING');
-      return;
     }
-
-    // Auto-countdown to engage calibrated stream after 5 seconds of signal search
-    const timer = setInterval(() => {
-      setCalibrationSeconds(prev => {
-        const next = prev + 1;
-        if (next >= 5) {
-          // Auto-engage calibrated clinical telemetry
-          setSensorMode('CALIBRATED_FALLBACK');
-          setHeartRate(75);
-          setSpo2(98);
-          setRhythm('Normal Sinus Rhythm (NSR)');
-          setPhase('ACQUIRING');
-          return 5;
-        }
-        return next;
-      });
-    }, 1000);
-
-    return () => clearInterval(timer);
   }, [isOpen, phase, telemetry]);
 
-  // Realistic natural physiological jitter while in CALIBRATED_FALLBACK
+  // Live telemetry synchronization during acquisition
   useEffect(() => {
-    if (phase !== 'ACQUIRING' || sensorMode !== 'CALIBRATED_FALLBACK') return;
-
-    const jitterInterval = setInterval(() => {
-      const baseHr = 75;
-      const jitter = Math.round(Math.sin(Date.now() / 1800) * 2);
-      setHeartRate(baseHr + jitter);
-      const currentSpo2 = Math.sin(Date.now() / 3200) > 0.4 ? 99 : 98;
-      setSpo2(currentSpo2);
-    }, 1000);
-
-    return () => clearInterval(jitterInterval);
-  }, [phase, sensorMode]);
+    if (phase !== 'ACQUIRING' || !telemetry) return;
+    if (telemetry.heart_rate && telemetry.heart_rate > 40) {
+      setHeartRate(telemetry.heart_rate);
+    }
+    if (telemetry.spo2 && telemetry.spo2 > 80) {
+      setSpo2(telemetry.spo2);
+    }
+    if (telemetry.leads_off !== undefined) {
+      setRhythm(telemetry.leads_off ? 'Leads Disconnected' : 'Normal Sinus Rhythm');
+    }
+  }, [phase, telemetry]);
 
   // 8-second capture completion countdown once valid vitals are streaming
   useEffect(() => {
@@ -351,7 +327,6 @@ export default function VitalsCaptureModal({
     setSensorMode('WAITING');
     setHeartRate(null);
     setSpo2(null);
-    setCalibrationSeconds(0);
     setCaptureProgress(0);
     setEcgBuffer([]);
     setUploadResult(null);
@@ -374,7 +349,7 @@ export default function VitalsCaptureModal({
       patientId: effectivePatientId,
       patientName: effectivePatientName,
       patientEmail: effectivePatientEmail,
-      sensorMode: sensorMode === 'LIVE_HARDWARE' ? 'LIVE_HARDWARE' : 'CALIBRATED_FALLBACK',
+      sensorMode: 'LIVE_HARDWARE',
     });
 
     const url = URL.createObjectURL(file);
@@ -408,7 +383,7 @@ export default function VitalsCaptureModal({
         patientId: effectivePatientId,
         patientName: effectivePatientName,
         patientEmail: effectivePatientEmail,
-        sensorMode: sensorMode === 'LIVE_HARDWARE' ? 'LIVE_HARDWARE' : 'CALIBRATED_FALLBACK',
+        sensorMode: 'LIVE_HARDWARE',
       });
 
       const formData = new FormData();
@@ -441,7 +416,7 @@ export default function VitalsCaptureModal({
           patientId: typeof effectivePatientId === 'number' ? effectivePatientId : undefined,
           patientName: effectivePatientName,
           patientEmail: effectivePatientEmail,
-          sensorMode: sensorMode === 'LIVE_HARDWARE' ? 'LIVE_HARDWARE' : 'CALIBRATED_FALLBACK',
+          sensorMode: 'LIVE_HARDWARE',
         });
       }
     } catch (err: any) {
@@ -504,30 +479,30 @@ export default function VitalsCaptureModal({
                 </span>
                 <div>
                   <strong className="font-semibold block text-slate-900 mb-0.5">
-                    Acquiring Optical & Biopotential Signals...
+                    {telemetry?.connected ? 'ESP32 Online — Awaiting Biometric Contact' : 'Connecting to ESP32 Telemetry Node...'}
                   </strong>
                   <span className="text-slate-600">
-                    Listening for MAX30102 PPG & AD8232 Lead-II telemetry ({Math.max(0, 5 - calibrationSeconds)}s)
+                    {telemetry?.connected
+                      ? (telemetry?.finger_detected 
+                          ? 'Biometric signal locked. Initiating acquisition...' 
+                          : 'Place finger firmly on the MAX30102 sensor to begin acquisition.')
+                      : 'Listening for real-time telemetry packets on /clinical/telemetry/latest'}
                   </span>
                 </div>
               </div>
               <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-white border border-blue-200 text-blue-700 font-mono text-xs font-bold shadow-xs">
                 <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-600" />
-                <span>Auto-Acquiring</span>
+                <span>{telemetry?.connected ? 'Awaiting Contact' : 'Scanning'}</span>
               </div>
             </div>
           )}
 
           {phase === 'ACQUIRING' && (
-            <div className={`p-4 rounded-xl flex items-center justify-between text-xs sm:text-sm border ${
-              sensorMode === 'LIVE_HARDWARE'
-                ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
-                : 'bg-emerald-50/80 border-emerald-300 text-emerald-950'
-            }`}>
+            <div className="p-4 rounded-xl flex items-center justify-between text-xs sm:text-sm border bg-emerald-50 border-emerald-200 text-emerald-900">
               <div className="flex items-center gap-2.5">
                 <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping"></span>
                 <span>
-                  <strong>{sensorMode === 'LIVE_HARDWARE' ? 'Live ESP32 Hardware Stream Active' : 'Sensor Telemetry Stream Active'}:</strong>{' '}
+                  <strong>Live Telemetry Stream Active:</strong>{' '}
                   Recording clinical window ({captureProgress}s / 8s)
                 </span>
               </div>
