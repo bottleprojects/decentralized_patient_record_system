@@ -305,23 +305,8 @@ export default function VitalsCaptureModal({
         ctx.stroke();
       }
 
-      // 3. Clinical 1.0 mV Calibration Pulse on Left Margin
-      ctx.lineWidth = 1.5;
-      ctx.strokeStyle = 'rgba(52, 211, 153, 0.45)';
-      const calibX = 14;
-      const calibBaseline = height * 0.58;
-      const calibHeight = height * 0.35; // 1mV standard calibration deflection
-      ctx.beginPath();
-      ctx.moveTo(calibX, calibBaseline);
-      ctx.lineTo(calibX + 5, calibBaseline);
-      ctx.lineTo(calibX + 5, calibBaseline - calibHeight);
-      ctx.lineTo(calibX + 15, calibBaseline - calibHeight);
-      ctx.lineTo(calibX + 15, calibBaseline);
-      ctx.lineTo(calibX + 20, calibBaseline);
-      ctx.stroke();
-
-      // 4. Trace Waveform
-      const traceStartX = 26;
+      // Trace Waveform across full canvas width
+      const traceStartX = 10;
       const availableWidth = width - traceStartX - 10;
       const stepX = availableWidth / 160;
       const baselineY = height * 0.58;
@@ -758,7 +743,7 @@ export default function VitalsCaptureModal({
                 </span>
               </div>
               <span className="font-mono text-[11px] text-slate-400">
-                Calibration 1.0 mV Pulse
+                Continuous 50Hz Sampling
               </span>
             </div>
 
