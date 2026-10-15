@@ -5,8 +5,6 @@ import {
   ShieldCheck, 
   CheckCircle2, 
   RotateCcw, 
-  Wifi, 
-  WifiOff, 
   X,
   Radio,
   FileCheck,
@@ -55,7 +53,6 @@ export default function VitalsCaptureModal({
   
   // Hardware & Calibration states
   const [telemetry, setTelemetry] = useState<any>(null);
-  const [sensorMode, setSensorMode] = useState<'WAITING' | 'LIVE_HARDWARE'>('WAITING');
   
   // Real-time clinical numbers
   const [heartRate, setHeartRate] = useState<number | null>(null);
@@ -87,7 +84,6 @@ export default function VitalsCaptureModal({
   useEffect(() => {
     if (isOpen) {
       setPhase('CALIBRATING');
-      setSensorMode('WAITING');
       setHeartRate(null);
       setSpo2(null);
       setCaptureProgress(0);
@@ -143,7 +139,6 @@ export default function VitalsCaptureModal({
     );
 
     if (hasLiveValidHardware) {
-      setSensorMode('LIVE_HARDWARE');
       setHeartRate(telemetry.heart_rate);
       setSpo2(telemetry.spo2);
       setRhythm(telemetry.leads_off ? 'Leads Off - Reattaching' : 'Normal Sinus Rhythm');
@@ -206,7 +201,7 @@ export default function VitalsCaptureModal({
     return Math.round(2048 + y * 900);
   };
 
-  // Canvas Waveform Render Loop
+  // Canvas Waveform Render Loop (Clinical Bedside Monitor Styling)
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -214,65 +209,96 @@ export default function VitalsCaptureModal({
     if (!ctx) return;
 
     let sampleCount = 0;
+    let animTime = 0;
+
     const render = () => {
+      animTime += 1;
       const width = canvas.width;
       const height = canvas.height;
 
-      // 1. Clear & Draw Medical ECG Grid
-      ctx.fillStyle = '#0a101d';
+      // 1. Hospital Monitor Background (Deep Clinical Slate)
+      ctx.fillStyle = '#0b1324';
       ctx.fillRect(0, 0, width, height);
 
-      // Minor grid lines
+      // 2. Millimeter Medical Grid (Subtle 1mm minor, 5mm major lines)
+      // Minor grid (every 14px)
       ctx.lineWidth = 0.5;
-      ctx.strokeStyle = 'rgba(16, 185, 129, 0.08)';
-      for (let x = 0; x < width; x += 15) {
+      ctx.strokeStyle = 'rgba(56, 189, 248, 0.05)';
+      for (let x = 0; x < width; x += 14) {
         ctx.beginPath();
         ctx.moveTo(x, 0);
         ctx.lineTo(x, height);
         ctx.stroke();
       }
-      for (let y = 0; y < height; y += 15) {
+      for (let y = 0; y < height; y += 14) {
         ctx.beginPath();
         ctx.moveTo(0, y);
         ctx.lineTo(width, y);
         ctx.stroke();
       }
 
-      // Major grid lines
-      ctx.lineWidth = 1;
-      ctx.strokeStyle = 'rgba(16, 185, 129, 0.16)';
-      for (let x = 0; x < width; x += 75) {
+      // Major grid (every 70px)
+      ctx.lineWidth = 0.8;
+      ctx.strokeStyle = 'rgba(56, 189, 248, 0.12)';
+      for (let x = 0; x < width; x += 70) {
         ctx.beginPath();
         ctx.moveTo(x, 0);
         ctx.lineTo(x, height);
         ctx.stroke();
       }
-      for (let y = 0; y < height; y += 75) {
+      for (let y = 0; y < height; y += 70) {
         ctx.beginPath();
         ctx.moveTo(0, y);
         ctx.lineTo(width, y);
         ctx.stroke();
       }
 
-      // 2. Draw Baseline or Active Waveform
-      ctx.lineWidth = 2.2;
+      // 3. Clinical 1.0 mV Calibration Pulse on Left Margin
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = 'rgba(52, 211, 153, 0.45)';
+      const calibX = 14;
+      const calibBaseline = height * 0.58;
+      const calibHeight = height * 0.35; // 1mV standard calibration deflection
+      ctx.beginPath();
+      ctx.moveTo(calibX, calibBaseline);
+      ctx.lineTo(calibX + 5, calibBaseline);
+      ctx.lineTo(calibX + 5, calibBaseline - calibHeight);
+      ctx.lineTo(calibX + 15, calibBaseline - calibHeight);
+      ctx.lineTo(calibX + 15, calibBaseline);
+      ctx.lineTo(calibX + 20, calibBaseline);
+      ctx.stroke();
+
+      // 4. Trace Waveform
+      const traceStartX = 26;
+      const availableWidth = width - traceStartX - 10;
+      const stepX = availableWidth / 160;
+      const baselineY = height * 0.58;
+
+      ctx.lineWidth = 2.0;
       ctx.strokeStyle = '#10b981';
-      ctx.shadowBlur = 8;
-      ctx.shadowColor = '#10b981';
+      ctx.shadowBlur = 6;
+      ctx.shadowColor = 'rgba(16, 185, 129, 0.4)';
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
 
       if (phase === 'CALIBRATING') {
-        // Scanning flatline with subtle biopotential baseline
+        // Living isoelectric baseline with natural micro-thermal wander
         ctx.beginPath();
-        const midY = height / 2;
-        ctx.moveTo(0, midY);
-        ctx.lineTo(width, midY);
+        for (let i = 0; i <= 160; i++) {
+          const x = traceStartX + i * stepX;
+          const slowWave = Math.sin((i * 0.04) + (animTime * 0.03)) * 1.8;
+          const microNoise = Math.sin((i * 0.25) + (animTime * 0.08)) * 0.6;
+          const y = baselineY + slowWave + microNoise;
+          if (i === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        }
         ctx.stroke();
       } else {
         sampleIndexRef.current += 1;
         sampleCount += 1;
         
         let newSample = 2048;
-        if (sensorMode === 'LIVE_HARDWARE' && telemetry?.ecg_samples?.length > 0) {
+        if (telemetry?.ecg_samples && telemetry.ecg_samples.length > 0) {
           const idx = sampleCount % telemetry.ecg_samples.length;
           newSample = telemetry.ecg_samples[idx];
         } else {
@@ -284,31 +310,30 @@ export default function VitalsCaptureModal({
           return next.slice(-160);
         });
 
-        ctx.beginPath();
-        const stepX = width / 160;
-        const baselineY = height * 0.58;
-
-        ecgBuffer.forEach((sample, i) => {
-          const normalized = (sample - 2048) / 1000;
-          const y = baselineY - normalized * (height * 0.42);
-          const x = i * stepX;
-
-          if (i === 0) {
-            ctx.moveTo(x, y);
-          } else {
-            ctx.lineTo(x, y);
-          }
-        });
-        ctx.stroke();
-
-        if (ecgBuffer.length > 0) {
-          const lastX = (ecgBuffer.length - 1) * stepX;
-          const lastSample = ecgBuffer[ecgBuffer.length - 1];
-          const lastY = baselineY - ((lastSample - 2048) / 1000) * (height * 0.42);
-          
+        if (ecgBuffer.length > 1) {
           ctx.beginPath();
-          ctx.arc(lastX, lastY, 4, 0, Math.PI * 2);
-          ctx.fillStyle = '#34d399';
+          ecgBuffer.forEach((sample, i) => {
+            const normalized = (sample - 2048) / 1000;
+            const y = baselineY - normalized * (height * 0.40);
+            const x = traceStartX + i * stepX;
+
+            if (i === 0) {
+              ctx.moveTo(x, y);
+            } else {
+              ctx.lineTo(x, y);
+            }
+          });
+          ctx.stroke();
+
+          // Sweeping Phosphor Leading Cursor Dot
+          const lastIdx = ecgBuffer.length - 1;
+          const lastX = traceStartX + lastIdx * stepX;
+          const lastSample = ecgBuffer[lastIdx];
+          const lastY = baselineY - ((lastSample - 2048) / 1000) * (height * 0.40);
+
+          ctx.beginPath();
+          ctx.arc(lastX, lastY, 3.5, 0, Math.PI * 2);
+          ctx.fillStyle = '#6ee7b7';
           ctx.fill();
         }
       }
@@ -320,11 +345,10 @@ export default function VitalsCaptureModal({
     return () => {
       if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
     };
-  }, [phase, sensorMode, telemetry, ecgBuffer]);
+  }, [phase, telemetry, ecgBuffer]);
 
   const handleReset = () => {
     setPhase('CALIBRATING');
-    setSensorMode('WAITING');
     setHeartRate(null);
     setSpo2(null);
     setCaptureProgress(0);
@@ -433,34 +457,35 @@ export default function VitalsCaptureModal({
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl overflow-hidden border border-slate-200 flex flex-col max-h-[92vh]">
         
         {/* Header */}
-        <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/70">
+        <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-white">
           <div className="flex items-center gap-3">
-            <span className="p-2.5 bg-rose-50 text-rose-600 rounded-xl border border-rose-100 shadow-sm">
-              <Activity className="w-5 h-5 animate-pulse" />
+            <span className="p-2.5 bg-rose-50 text-rose-600 rounded-xl border border-rose-100 shadow-2xs">
+              <Activity className="w-5 h-5 text-rose-600" />
             </span>
             <div>
-              <h3 className="text-lg font-bold text-slate-900 tracking-tight">
-                ECG & Pulse Oximetry Capture
+              <h3 className="text-base font-bold text-slate-900 tracking-tight">
+                Vital Signs & Rhythm Monitor
               </h3>
               <p className="text-xs text-slate-500">
-                MAX30102 Optical Sensor + AD8232 Biopotential Front-End Telemetry
+                Continuous Lead-II ECG and Pulse Oximetry Telemetry
               </p>
             </div>
           </div>
           
           <div className="flex items-center gap-3">
-            <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold ${
+            <div className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-medium ${
               telemetry?.connected 
-                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' 
-                : 'bg-slate-100 text-slate-700 border border-slate-200'
+                ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' 
+                : 'bg-slate-100 text-slate-600 border border-slate-200'
             }`}>
-              {telemetry?.connected ? <Wifi className="w-3.5 h-3.5 text-emerald-600" /> : <WifiOff className="w-3.5 h-3.5 text-slate-500" />}
-              <span>{telemetry?.connected ? 'ESP32 Online' : 'ESP32 Standby'}</span>
+              <span className={`w-2 h-2 rounded-full ${telemetry?.connected ? 'bg-emerald-500' : 'bg-slate-400'}`} />
+              <span>{telemetry?.connected ? 'Monitor Online' : 'Searching for Monitor'}</span>
             </div>
 
             <button 
               onClick={onClose} 
-              className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-200/60 transition-colors"
+              className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 transition-colors"
+              aria-label="Close"
             >
               <X className="w-5 h-5" />
             </button>
@@ -468,100 +493,110 @@ export default function VitalsCaptureModal({
         </div>
 
         {/* Modal Body */}
-        <div className="p-6 space-y-6 overflow-y-auto">
+        <div className="p-6 space-y-5 overflow-y-auto">
           
-          {/* Status Alert Banner */}
+          {/* Clinical Guidance Banner */}
           {phase === 'CALIBRATING' && (
-            <div className="bg-blue-50/70 border border-blue-200 text-blue-950 p-4 rounded-xl flex items-center justify-between text-xs sm:text-sm shadow-xs">
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 flex items-center justify-between text-xs sm:text-sm">
               <div className="flex items-center gap-3">
-                <span className="p-2 bg-blue-100 text-blue-600 rounded-xl">
-                  <Radio className="w-5 h-5 animate-pulse" />
+                <span className="p-2 bg-blue-50 text-blue-600 rounded-lg border border-blue-100">
+                  <Radio className="w-4 h-4" />
                 </span>
                 <div>
-                  <strong className="font-semibold block text-slate-900 mb-0.5">
-                    {telemetry?.connected ? 'ESP32 Online — Awaiting Biometric Contact' : 'Connecting to ESP32 Telemetry Node...'}
-                  </strong>
-                  <span className="text-slate-600">
+                  <h4 className="font-semibold text-slate-900 text-xs sm:text-sm">
+                    {telemetry?.connected 
+                      ? 'Telemetry connected — Awaiting sensor contact' 
+                      : 'Connecting to patient telemetry monitor...'}
+                  </h4>
+                  <p className="text-slate-500 text-xs mt-0.5">
                     {telemetry?.connected
                       ? (telemetry?.finger_detected 
-                          ? 'Biometric signal locked. Initiating acquisition...' 
-                          : 'Place finger firmly on the MAX30102 sensor to begin acquisition.')
-                      : 'Listening for real-time telemetry packets on /clinical/telemetry/latest'}
-                  </span>
+                          ? 'Signal verified. Stabilizing reading...' 
+                          : 'Please place patient index finger on the optical sensor and verify lead placement.')
+                      : 'Ensure the wireless vitals monitor is powered on and within network range.'}
+                  </p>
                 </div>
               </div>
-              <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-white border border-blue-200 text-blue-700 font-mono text-xs font-bold shadow-xs">
-                <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-600" />
-                <span>{telemetry?.connected ? 'Awaiting Contact' : 'Scanning'}</span>
+              <div className="flex items-center gap-2 px-2.5 py-1 rounded-md bg-white border border-slate-200 text-slate-700 text-xs font-medium shadow-2xs">
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-slate-500" />
+                <span>{telemetry?.connected ? 'Ready' : 'Listening'}</span>
               </div>
             </div>
           )}
 
           {phase === 'ACQUIRING' && (
-            <div className="p-4 rounded-xl flex items-center justify-between text-xs sm:text-sm border bg-emerald-50 border-emerald-200 text-emerald-900">
-              <div className="flex items-center gap-2.5">
-                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping"></span>
-                <span>
-                  <strong>Live Telemetry Stream Active:</strong>{' '}
-                  Recording clinical window ({captureProgress}s / 8s)
-                </span>
+            <div className="bg-emerald-50/70 border border-emerald-200 rounded-xl p-4 flex items-center justify-between text-xs sm:text-sm">
+              <div className="flex items-center gap-3">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                <div>
+                  <h4 className="font-semibold text-emerald-950 text-xs sm:text-sm">
+                    Recording Diagnostic Window
+                  </h4>
+                  <p className="text-emerald-700 text-xs mt-0.5">
+                    Capturing continuous 8-second physiological rhythm. Keep patient resting comfortably.
+                  </p>
+                </div>
               </div>
-              <span className="font-mono text-xs font-bold px-2.5 py-1 rounded bg-white shadow-xs text-emerald-700">
-                {Math.round((captureProgress / 8) * 100)}%
+              <span className="font-mono text-xs font-semibold px-2.5 py-1 rounded-md bg-white text-emerald-800 border border-emerald-200 shadow-2xs">
+                {captureProgress}s / 8s
               </span>
             </div>
           )}
 
           {phase === 'CAPTURE_COMPLETE' && (
-            <div className="bg-emerald-50 border border-emerald-300 text-emerald-900 p-4 rounded-xl flex items-center justify-between text-xs sm:text-sm shadow-sm">
-              <div className="flex items-center gap-2.5">
+            <div className="bg-emerald-50/90 border border-emerald-200 text-emerald-900 p-4 rounded-xl flex items-center justify-between text-xs sm:text-sm">
+              <div className="flex items-center gap-3">
                 <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
                 <div>
-                  <strong className="font-semibold block">Clinical Vitals Capture Complete!</strong>
-                  <span>8-second physiological sample ready to export as vector PDF and seal to IPFS.</span>
+                  <h4 className="font-semibold text-emerald-950 text-xs sm:text-sm">
+                    Vitals Capture Complete
+                  </h4>
+                  <p className="text-emerald-700 text-xs mt-0.5">
+                    8-second continuous rhythm recorded. Review telemetry summary below before saving.
+                  </p>
                 </div>
               </div>
-              <span className="px-2.5 py-1 bg-emerald-600 text-white font-bold text-xs rounded-lg uppercase tracking-wider">
-                100% Locked
+              <span className="px-2.5 py-1 bg-emerald-600 text-white font-medium text-xs rounded-md shadow-2xs">
+                Sample Acquired
               </span>
             </div>
           )}
 
-          {/* Cryptographic Sealing Success Badge */}
+          {/* Cryptographic Sealing Audit Card */}
           {uploadResult && (
-            <div className="p-4 bg-emerald-50/90 border border-emerald-300 rounded-xl space-y-2 text-xs">
-              <div className="flex items-center gap-2 font-bold text-emerald-900">
+            <div className="p-4 bg-emerald-50/70 border border-emerald-200 rounded-xl space-y-2 text-xs">
+              <div className="flex items-center gap-2 font-semibold text-emerald-900">
                 <ShieldCheck className="w-4 h-4 text-emerald-600" />
-                <span>Sealed to IPFS & Anchored on Sepolia Blockchain</span>
+                <span>Immutably Anchored to IPFS & Sepolia Audit Log</span>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] font-mono text-slate-700">
-                <div className="bg-white p-2 rounded border border-emerald-200">
-                  <span className="text-slate-400 block text-[10px]">IPFS Content Identifier (CID):</span>
+                <div className="bg-white p-2.5 rounded-lg border border-emerald-200 shadow-2xs">
+                  <span className="text-slate-400 block text-[10px] uppercase font-sans">IPFS Storage (CID)</span>
                   <a 
                     href={`https://gateway.pinata.cloud/ipfs/${uploadResult.cid}`}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-blue-600 hover:underline flex items-center gap-1 font-bold mt-0.5"
+                    className="text-blue-600 hover:underline flex items-center gap-1 font-semibold mt-0.5"
                   >
                     <span>{uploadResult.cid.slice(0, 14)}...{uploadResult.cid.slice(-8)}</span>
                     <ExternalLink className="w-3 h-3 opacity-70" />
                   </a>
                 </div>
-                <div className="bg-white p-2 rounded border border-emerald-200">
-                  <span className="text-slate-400 block text-[10px]">Sepolia Transaction Hash:</span>
+                <div className="bg-white p-2.5 rounded-lg border border-emerald-200 shadow-2xs">
+                  <span className="text-slate-400 block text-[10px] uppercase font-sans">Blockchain Record (Tx)</span>
                   <a 
                     href={`https://sepolia.etherscan.io/tx/${uploadResult.tx_hash}`}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-indigo-600 hover:underline flex items-center gap-1 font-bold mt-0.5"
+                    className="text-indigo-600 hover:underline flex items-center gap-1 font-semibold mt-0.5"
                   >
                     <span>{uploadResult.tx_hash.slice(0, 14)}...{uploadResult.tx_hash.slice(-8)}</span>
                     <ExternalLink className="w-3 h-3 opacity-70" />
                   </a>
                 </div>
-                <div className="bg-white p-2 rounded border border-emerald-200 sm:col-span-2">
-                  <span className="text-slate-400 block text-[10px]">SHA-256 Record Hash:</span>
-                  <span className="text-slate-800 font-bold break-all">{uploadResult.record_hash}</span>
+                <div className="bg-white p-2.5 rounded-lg border border-emerald-200 sm:col-span-2 shadow-2xs">
+                  <span className="text-slate-400 block text-[10px] uppercase font-sans">SHA-256 Checksum</span>
+                  <span className="text-slate-800 font-semibold break-all">{uploadResult.record_hash}</span>
                 </div>
               </div>
             </div>
@@ -573,86 +608,105 @@ export default function VitalsCaptureModal({
             </div>
           )}
 
-          {/* Vitals Summary Cards */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          {/* Clinical Vital Signs Display */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
             {/* Heart Rate */}
-            <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl relative overflow-hidden">
+            <div className="p-4 bg-white border border-slate-200/90 rounded-xl hover:border-slate-300 transition-colors shadow-2xs">
               <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-bold uppercase tracking-wider text-slate-500">Heart Rate (PR)</span>
-                <Heart className={`w-4 h-4 text-rose-500 ${phase !== 'CALIBRATING' ? 'animate-bounce' : ''}`} />
+                <span className="text-xs font-medium text-slate-500">Pulse Rate (PR)</span>
+                <span className="p-1.5 rounded-md bg-rose-50 text-rose-600">
+                  <Heart className={`w-3.5 h-3.5 ${phase === 'ACQUIRING' ? 'animate-pulse' : ''}`} />
+                </span>
               </div>
-              <div className="text-3xl font-extrabold text-slate-900 tracking-tight flex items-baseline gap-1">
-                {heartRate ? heartRate : '--'}
-                <span className="text-xs font-semibold text-slate-500">BPM</span>
+              <div className="flex items-baseline gap-1.5">
+                <span className="text-3xl font-bold tracking-tight text-slate-900">
+                  {heartRate ?? '--'}
+                </span>
+                <span className="text-xs font-medium text-slate-500">bpm</span>
               </div>
-              <div className="mt-1 text-[11px] text-slate-500 font-medium">
-                {heartRate ? 'Normal Resting Range (60-100)' : 'Acquiring pulse signal...'}
-              </div>
+              <p className="mt-1.5 text-[11px] text-slate-500">
+                {heartRate ? 'Normal resting range (60–100)' : 'Awaiting pulse reading...'}
+              </p>
             </div>
 
             {/* SpO2 */}
-            <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl relative overflow-hidden">
+            <div className="p-4 bg-white border border-slate-200/90 rounded-xl hover:border-slate-300 transition-colors shadow-2xs">
               <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-bold uppercase tracking-wider text-slate-500">Blood Oxygen (SpO2)</span>
-                <Activity className="w-4 h-4 text-blue-500" />
+                <span className="text-xs font-medium text-slate-500">Oxygen Saturation (SpO₂)</span>
+                <span className="p-1.5 rounded-md bg-sky-50 text-sky-600">
+                  <Activity className="w-3.5 h-3.5" />
+                </span>
               </div>
-              <div className="text-3xl font-extrabold text-slate-900 tracking-tight flex items-baseline gap-1">
-                {spo2 ? `${spo2}%` : '-- %'}
+              <div className="flex items-baseline gap-1.5">
+                <span className="text-3xl font-bold tracking-tight text-slate-900">
+                  {spo2 ? `${spo2}` : '--'}
+                </span>
+                <span className="text-xs font-medium text-slate-500">%</span>
               </div>
-              <div className="mt-1 text-[11px] text-slate-500 font-medium">
-                {spo2 ? 'Adequate Arterial Saturation' : 'Acquiring perfusion...'}
-              </div>
+              <p className="mt-1.5 text-[11px] text-slate-500">
+                {spo2 ? 'Adequate arterial oxygenation' : 'Awaiting sensor perfusion...'}
+              </p>
             </div>
 
             {/* Rhythm */}
-            <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl relative overflow-hidden">
+            <div className="p-4 bg-white border border-slate-200/90 rounded-xl hover:border-slate-300 transition-colors shadow-2xs">
               <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-bold uppercase tracking-wider text-slate-500">ECG Rhythm</span>
-                <ShieldCheck className="w-4 h-4 text-emerald-500" />
+                <span className="text-xs font-medium text-slate-500">Rhythm Analysis</span>
+                <span className="p-1.5 rounded-md bg-emerald-50 text-emerald-600">
+                  <ShieldCheck className="w-3.5 h-3.5" />
+                </span>
               </div>
-              <div className="text-base font-bold text-slate-800 tracking-tight mt-1 truncate" title={rhythm}>
-                {phase === 'CALIBRATING' ? 'Calibrating...' : rhythm}
+              <div className="text-base font-semibold text-slate-900 truncate mt-1" title={rhythm}>
+                {phase === 'CALIBRATING' ? 'Analyzing baseline...' : rhythm}
               </div>
-              <div className="mt-2 text-[11px] text-slate-500 font-mono">
-                PR: 142ms | QRS: 88ms
-              </div>
+              <p className="mt-1.5 text-[11px] text-slate-500">
+                Lead II • Continuous sampling
+              </p>
             </div>
           </div>
 
-          {/* HTML5 Canvas ECG PQRST Monitor */}
+          {/* Clinical Waveform Strip */}
           <div className="space-y-2">
-            <div className="flex items-center justify-between text-xs text-slate-600 font-semibold px-1">
-              <span className="flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
-                Lead II Real-Time Vector Waveform (25 mm/s, 10 mm/mV)
-              </span>
+            <div className="flex items-center justify-between text-xs text-slate-600 font-medium px-0.5">
+              <div className="flex items-center gap-2">
+                <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-700 font-semibold text-[11px] tracking-wide border border-slate-200">
+                  LEAD II
+                </span>
+                <span className="text-slate-500 text-[11px]">
+                  Real-time rhythm strip (25 mm/s, 10 mm/mV)
+                </span>
+              </div>
               <span className="font-mono text-[11px] text-slate-400">
-                100 Hz Optical/Biopotential Filter
+                Calibration 1.0 mV Pulse
               </span>
             </div>
 
-            <div className="rounded-xl overflow-hidden border border-slate-800 shadow-inner bg-[#0a101d]">
+            <div className="rounded-xl overflow-hidden border border-slate-900 shadow-sm bg-[#0b1324] relative">
               <canvas 
                 ref={canvasRef} 
-                width={700} 
-                height={210} 
-                className="w-full h-48 block"
+                width={720} 
+                height={190} 
+                className="w-full h-44 block"
               />
+              <div className="absolute top-2.5 right-3 pointer-events-none flex items-center gap-2 text-[10px] font-mono text-emerald-400/80 bg-slate-900/60 px-2 py-0.5 rounded border border-emerald-500/20">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                <span>LIVE ECG</span>
+              </div>
             </div>
           </div>
 
           {/* Acquisition Progress Bar */}
           {phase === 'ACQUIRING' && (
-            <div className="space-y-1">
-              <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
+            <div className="space-y-1.5">
+              <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden border border-slate-200">
                 <div 
                   className="bg-emerald-500 h-2 rounded-full transition-all duration-300"
                   style={{ width: `${(captureProgress / 8) * 100}%` }}
                 ></div>
               </div>
-              <div className="flex justify-between text-[11px] text-slate-400 font-mono">
+              <div className="flex justify-between text-[11px] text-slate-500 font-medium">
                 <span>0s</span>
-                <span>Recording 8-second continuous clinical window</span>
+                <span>Recording 8-second continuous baseline</span>
                 <span>8s</span>
               </div>
             </div>
@@ -663,10 +717,10 @@ export default function VitalsCaptureModal({
         <div className="px-6 py-4 bg-slate-50/80 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-3">
           <div className="text-xs text-slate-500 flex items-center gap-2">
             <Lock className="w-3.5 h-3.5 text-slate-400" />
-            <span>Encrypted with AES-256-GCM & verified on Sepolia</span>
+            <span>Encrypted and anchored to clinical audit ledger</span>
           </div>
 
-          <div className="flex items-center gap-3 w-full sm:w-auto">
+          <div className="flex items-center gap-2.5 w-full sm:w-auto">
             {phase === 'CAPTURE_COMPLETE' ? (
               <>
                 <button
@@ -675,39 +729,39 @@ export default function VitalsCaptureModal({
                   className="btn-secondary text-xs flex items-center gap-1.5 py-2 px-3"
                 >
                   <RotateCcw className="w-3.5 h-3.5" />
-                  Retake Vitals
+                  Retake
                 </button>
 
                 <button
                   type="button"
                   onClick={handleDownloadPdf}
                   className="btn-secondary text-xs flex items-center gap-1.5 py-2 px-3"
-                  title="Download and inspect generated PDF report locally"
+                  title="Download clinical PDF report"
                 >
                   <Download className="w-3.5 h-3.5 text-blue-600" />
-                  Download / Preview PDF
+                  Download PDF
                 </button>
 
                 <button
                   type="button"
                   onClick={handleUploadToIpfs}
                   disabled={uploading || !!uploadResult}
-                  className="btn-primary text-xs flex items-center gap-2 py-2 px-4 shadow-md shadow-blue-500/20"
+                  className="btn-primary text-xs flex items-center gap-2 py-2 px-4 shadow-sm"
                 >
                   {uploading ? (
                     <>
                       <Loader2 className="w-4 h-4 animate-spin" />
-                      Sealing & Pinning to IPFS...
+                      Saving to Record...
                     </>
                   ) : uploadResult ? (
                     <>
                       <FileCheck className="w-4 h-4 text-emerald-300" />
-                      Sealed to IPFS & Blockchain
+                      Saved & Sealed
                     </>
                   ) : (
                     <>
                       <Upload className="w-4 h-4" />
-                      Upload Vitals PDF to IPFS
+                      Save to Medical Record
                     </>
                   )}
                 </button>
@@ -718,7 +772,7 @@ export default function VitalsCaptureModal({
                 onClick={onClose}
                 className="btn-secondary text-xs py-2 px-4 w-full sm:w-auto"
               >
-                Cancel
+                Close
               </button>
             )}
           </div>
@@ -728,3 +782,4 @@ export default function VitalsCaptureModal({
     </div>
   );
 }
+
