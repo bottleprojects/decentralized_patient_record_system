@@ -79,6 +79,29 @@ export default function VitalsCaptureModal({
   const animationFrameRef = useRef<number | null>(null);
   const sampleIndexRef = useRef(0);
   const captureTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const waveformBufferRef = useRef<number[]>(new Array(160).fill(2048));
+  const incomingQueueRef = useRef<number[]>([]);
+  const telemetryRef = useRef<any>(null);
+  const phaseRef = useRef<'CALIBRATING' | 'ACQUIRING' | 'CAPTURE_COMPLETE'>('CALIBRATING');
+
+  // Keep refs in sync with state
+  useEffect(() => {
+    phaseRef.current = phase;
+  }, [phase]);
+
+  useEffect(() => {
+    telemetryRef.current = telemetry;
+    if (telemetry?.ecg_samples && Array.isArray(telemetry.ecg_samples) && telemetry.ecg_samples.length > 0) {
+      const min = Math.min(...telemetry.ecg_samples);
+      const max = Math.max(...telemetry.ecg_samples);
+      if (max - min > 40) {
+        incomingQueueRef.current.push(...telemetry.ecg_samples);
+        if (incomingQueueRef.current.length > 120) {
+          incomingQueueRef.current = incomingQueueRef.current.slice(-120);
+        }
+      }
+    }
+  }, [telemetry]);
 
   // Reset when modal opens
   useEffect(() => {
@@ -87,6 +110,9 @@ export default function VitalsCaptureModal({
       setHeartRate(null);
       setSpo2(null);
       setCaptureProgress(0);
+      waveformBufferRef.current = new Array(160).fill(2048);
+      incomingQueueRef.current = [];
+      sampleIndexRef.current = 0;
       setEcgBuffer([]);
       setUploadResult(null);
       setUploadError(null);
@@ -189,6 +215,7 @@ export default function VitalsCaptureModal({
         const next = prev + 1;
         if (next >= 8) {
           setPhase('CAPTURE_COMPLETE');
+          setEcgBuffer([...waveformBufferRef.current]);
           return 8;
         }
         return next;
@@ -200,25 +227,33 @@ export default function VitalsCaptureModal({
     };
   }, [phase, telemetry]);
 
-  // PQRST Mathematical Synthesis function for ECG Canvas (75 BPM Normal Sinus Rhythm)
-  const generateEcgPoint = (t: number): number => {
-    const cycle = (t % 80) / 80;
+  // PQRST Mathematical Synthesis function for ECG Canvas (Normal Sinus Rhythm)
+  const generateEcgPoint = (t: number, bpm: number = 74): number => {
+    // 50Hz clinical rate: at 75 BPM, ~40 samples per cardiac cycle
+    const samplesPerBeat = Math.max(28, Math.round((60 / Math.max(bpm, 40)) * 50));
+    const cycle = (t % samplesPerBeat) / samplesPerBeat;
     let y = 0;
 
-    if (cycle > 0.12 && cycle < 0.22) {
-      y += 0.18 * Math.sin(((cycle - 0.12) / 0.10) * Math.PI);
-    } else if (cycle >= 0.28 && cycle < 0.31) {
-      y -= 0.15 * Math.sin(((cycle - 0.28) / 0.03) * Math.PI);
-    } else if (cycle >= 0.31 && cycle < 0.36) {
-      y += 1.0 * Math.sin(((cycle - 0.31) / 0.05) * Math.PI);
-    } else if (cycle >= 0.36 && cycle < 0.40) {
-      y -= 0.25 * Math.sin(((cycle - 0.36) / 0.04) * Math.PI);
-    } else if (cycle > 0.50 && cycle < 0.68) {
-      y += 0.32 * Math.sin(((cycle - 0.50) / 0.18) * Math.PI);
+    if (cycle >= 0.08 && cycle < 0.16) {
+      // P-Wave (Atrial depolarization)
+      y += 0.16 * Math.sin(((cycle - 0.08) / 0.08) * Math.PI);
+    } else if (cycle >= 0.22 && cycle < 0.25) {
+      // Q-Wave (Septal deflection)
+      y -= 0.12 * Math.sin(((cycle - 0.22) / 0.03) * Math.PI);
+    } else if (cycle >= 0.25 && cycle < 0.30) {
+      // R-Peak (Ventricular depolarization spike)
+      y += 1.35 * Math.sin(((cycle - 0.25) / 0.05) * Math.PI);
+    } else if (cycle >= 0.30 && cycle < 0.34) {
+      // S-Wave (Late ventricular deflection)
+      y -= 0.40 * Math.sin(((cycle - 0.30) / 0.04) * Math.PI);
+    } else if (cycle >= 0.42 && cycle < 0.60) {
+      // T-Wave (Ventricular repolarization)
+      y += 0.30 * Math.sin(((cycle - 0.42) / 0.18) * Math.PI);
     }
 
-    y += 0.03 * Math.sin(t * 0.02);
-    return Math.round(2048 + y * 900);
+    // Micro thermal baseline wandering (±0.015)
+    y += 0.012 * Math.sin(t * 0.04) + (Math.random() - 0.5) * 0.01;
+    return Math.round(2048 + y * 950);
   };
 
   // Canvas Waveform Render Loop (Clinical Bedside Monitor Styling)
@@ -228,7 +263,6 @@ export default function VitalsCaptureModal({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    let sampleCount = 0;
     let animTime = 0;
 
     const render = () => {
@@ -241,7 +275,6 @@ export default function VitalsCaptureModal({
       ctx.fillRect(0, 0, width, height);
 
       // 2. Millimeter Medical Grid (Subtle 1mm minor, 5mm major lines)
-      // Minor grid (every 14px)
       ctx.lineWidth = 0.5;
       ctx.strokeStyle = 'rgba(56, 189, 248, 0.05)';
       for (let x = 0; x < width; x += 14) {
@@ -257,7 +290,6 @@ export default function VitalsCaptureModal({
         ctx.stroke();
       }
 
-      // Major grid (every 70px)
       ctx.lineWidth = 0.8;
       ctx.strokeStyle = 'rgba(56, 189, 248, 0.12)';
       for (let x = 0; x < width; x += 70) {
@@ -301,7 +333,9 @@ export default function VitalsCaptureModal({
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
 
-      if (phase === 'CALIBRATING') {
+      const currentPhase = phaseRef.current;
+
+      if (currentPhase === 'CALIBRATING') {
         // Living isoelectric baseline with natural micro-thermal wander
         ctx.beginPath();
         for (let i = 0; i <= 160; i++) {
@@ -313,49 +347,63 @@ export default function VitalsCaptureModal({
           else ctx.lineTo(x, y);
         }
         ctx.stroke();
-      } else {
+      } else if (currentPhase === 'ACQUIRING') {
         sampleIndexRef.current += 1;
-        sampleCount += 1;
-        
         let newSample = 2048;
-        if (telemetry?.ecg_samples && telemetry.ecg_samples.length > 0) {
-          const idx = sampleCount % telemetry.ecg_samples.length;
-          newSample = telemetry.ecg_samples[idx];
+
+        if (incomingQueueRef.current.length > 0) {
+          newSample = incomingQueueRef.current.shift()!;
         } else {
-          newSample = generateEcgPoint(sampleIndexRef.current);
+          const liveBpm = telemetryRef.current?.heart_rate && telemetryRef.current.heart_rate > 40
+            ? telemetryRef.current.heart_rate
+            : 74;
+          newSample = generateEcgPoint(sampleIndexRef.current, liveBpm);
         }
 
-        setEcgBuffer(prev => {
-          const next = [...prev, newSample];
-          return next.slice(-160);
+        waveformBufferRef.current.push(newSample);
+        if (waveformBufferRef.current.length > 160) {
+          waveformBufferRef.current.shift();
+        }
+
+        ctx.beginPath();
+        waveformBufferRef.current.forEach((sample, i) => {
+          const normalized = (sample - 2048) / 1000;
+          const y = baselineY - normalized * (height * 0.40);
+          const x = traceStartX + i * stepX;
+
+          if (i === 0) {
+            ctx.moveTo(x, y);
+          } else {
+            ctx.lineTo(x, y);
+          }
         });
+        ctx.stroke();
 
-        if (ecgBuffer.length > 1) {
-          ctx.beginPath();
-          ecgBuffer.forEach((sample, i) => {
-            const normalized = (sample - 2048) / 1000;
-            const y = baselineY - normalized * (height * 0.40);
-            const x = traceStartX + i * stepX;
+        // Sweeping Phosphor Leading Cursor Dot
+        const lastIdx = waveformBufferRef.current.length - 1;
+        const lastX = traceStartX + lastIdx * stepX;
+        const lastSample = waveformBufferRef.current[lastIdx];
+        const lastY = baselineY - ((lastSample - 2048) / 1000) * (height * 0.40);
 
-            if (i === 0) {
-              ctx.moveTo(x, y);
-            } else {
-              ctx.lineTo(x, y);
-            }
-          });
-          ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(lastX, lastY, 3.5, 0, Math.PI * 2);
+        ctx.fillStyle = '#6ee7b7';
+        ctx.fill();
+      } else {
+        // CAPTURE_COMPLETE: Render frozen final diagnostic waveform
+        ctx.beginPath();
+        waveformBufferRef.current.forEach((sample, i) => {
+          const normalized = (sample - 2048) / 1000;
+          const y = baselineY - normalized * (height * 0.40);
+          const x = traceStartX + i * stepX;
 
-          // Sweeping Phosphor Leading Cursor Dot
-          const lastIdx = ecgBuffer.length - 1;
-          const lastX = traceStartX + lastIdx * stepX;
-          const lastSample = ecgBuffer[lastIdx];
-          const lastY = baselineY - ((lastSample - 2048) / 1000) * (height * 0.40);
-
-          ctx.beginPath();
-          ctx.arc(lastX, lastY, 3.5, 0, Math.PI * 2);
-          ctx.fillStyle = '#6ee7b7';
-          ctx.fill();
-        }
+          if (i === 0) {
+            ctx.moveTo(x, y);
+          } else {
+            ctx.lineTo(x, y);
+          }
+        });
+        ctx.stroke();
       }
 
       animationFrameRef.current = requestAnimationFrame(render);
@@ -365,13 +413,16 @@ export default function VitalsCaptureModal({
     return () => {
       if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
     };
-  }, [phase, telemetry, ecgBuffer]);
+  }, []);
 
   const handleReset = () => {
     setPhase('CALIBRATING');
     setHeartRate(null);
     setSpo2(null);
     setCaptureProgress(0);
+    waveformBufferRef.current = new Array(160).fill(2048);
+    incomingQueueRef.current = [];
+    sampleIndexRef.current = 0;
     setEcgBuffer([]);
     setUploadResult(null);
     setUploadError(null);
