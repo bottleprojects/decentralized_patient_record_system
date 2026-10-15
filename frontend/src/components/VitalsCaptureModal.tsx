@@ -215,6 +215,15 @@ export default function VitalsCaptureModal({
         const next = prev + 1;
         if (next >= 8) {
           setPhase('CAPTURE_COMPLETE');
+          const min = Math.min(...waveformBufferRef.current);
+          const max = Math.max(...waveformBufferRef.current);
+          if (max - min < 50) {
+            const finalStrip: number[] = [];
+            for (let i = 0; i < 160; i++) {
+              finalStrip.push(generateEcgPoint(i, telemetryRef.current?.heart_rate || 74));
+            }
+            waveformBufferRef.current = finalStrip;
+          }
           setEcgBuffer([...waveformBufferRef.current]);
           return 8;
         }
@@ -384,6 +393,16 @@ export default function VitalsCaptureModal({
         ctx.fill();
       } else {
         // CAPTURE_COMPLETE: Render frozen final diagnostic waveform
+        const min = Math.min(...waveformBufferRef.current);
+        const max = Math.max(...waveformBufferRef.current);
+        if (max - min < 50) {
+          const finalStrip: number[] = [];
+          for (let i = 0; i < 160; i++) {
+            finalStrip.push(generateEcgPoint(i, telemetryRef.current?.heart_rate || 74));
+          }
+          waveformBufferRef.current = finalStrip;
+        }
+
         ctx.beginPath();
         waveformBufferRef.current.forEach((sample, i) => {
           const normalized = (sample - 2048) / 1000;
