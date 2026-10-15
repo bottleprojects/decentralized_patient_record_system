@@ -258,14 +258,22 @@ export default function VitalsCaptureModal({
 
   // Canvas Waveform Render Loop (Clinical Bedside Monitor Styling)
   useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+    if (!isOpen) return;
 
     let animTime = 0;
 
     const render = () => {
+      const canvas = canvasRef.current;
+      if (!canvas) {
+        animationFrameRef.current = requestAnimationFrame(render);
+        return;
+      }
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        animationFrameRef.current = requestAnimationFrame(render);
+        return;
+      }
+
       animTime += 1;
       const width = canvas.width;
       const height = canvas.height;
@@ -398,7 +406,7 @@ export default function VitalsCaptureModal({
     return () => {
       if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
     };
-  }, []);
+  }, [isOpen]);
 
   const handleReset = () => {
     setPhase('CALIBRATING');
