@@ -66,8 +66,8 @@ export default function Login() {
               <Activity className="w-6 h-6 text-white" />
             </div>
             <div>
-              <h1 className="text-xl font-bold text-slate-800 tracking-tight leading-none">DPRMS</h1>
-              <span className="text-xs uppercase font-semibold text-slate-500 tracking-wider">Health Systems</span>
+              <h1 className="text-lg font-bold text-slate-800 tracking-tight leading-snug">Decentralized Patient</h1>
+              <span className="text-xs uppercase font-semibold text-slate-500 tracking-wider">Record Management System</span>
             </div>
           </div>
           
@@ -114,7 +114,7 @@ export default function Login() {
         </div>
         
         <div className="p-12 relative z-10 text-sm text-slate-500 font-medium">
-          &copy; {new Date().getFullYear()} DPRMS Health Systems. Secure Portal.
+          &copy; {new Date().getFullYear()} Decentralized Patient Record Management System. Secure Portal.
         </div>
       </div>
       
@@ -123,12 +123,13 @@ export default function Login() {
         <div className="w-full max-w-md">
           
           {/* Mobile Logo */}
-          <div className="lg:hidden flex items-center justify-center gap-3 mb-10">
-            <div className="w-10 h-10 bg-blue-700 rounded-lg flex items-center justify-center">
+          <div className="lg:hidden flex items-center justify-center gap-3 mb-10 text-center">
+            <div className="w-10 h-10 bg-blue-700 rounded-lg flex items-center justify-center shrink-0">
               <Activity className="w-6 h-6 text-white" />
             </div>
-            <div>
-              <h1 className="text-2xl font-bold text-slate-800 tracking-tight leading-none">DPRMS</h1>
+            <div className="text-left">
+              <h1 className="text-base font-bold text-slate-800 tracking-tight leading-tight">Decentralized Patient</h1>
+              <span className="text-[10px] uppercase font-semibold text-slate-500 tracking-wider">Record Management System</span>
             </div>
           </div>
           

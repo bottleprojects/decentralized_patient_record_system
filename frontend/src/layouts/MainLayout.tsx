@@ -113,7 +113,7 @@ export default function MainLayout() {
     if (location.pathname.includes('/doctor/patient')) return 'Patient Electronic Record';
     if (location.pathname === '/admin') return 'Administration Console';
     if (location.pathname === '/analytics') return 'System Metrics & Blockchain Analytics';
-    return 'DPRMS Portal';
+    return 'Decentralized Patient Record Management System';
   };
 
   return (
@@ -127,14 +127,18 @@ export default function MainLayout() {
       <aside className={`fixed inset-y-0 left-0 z-50 w-64 bg-white border-r border-slate-200 flex flex-col transition-transform duration-300 md:relative md:translate-x-0 ${mobileMenuOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         
         {/* Hospital Branding Logo */}
-        <div className="h-16 flex items-center px-6 border-b border-slate-200">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 bg-blue-700 rounded flex items-center justify-center">
-              <Activity className="w-5 h-5 text-white" />
+        <div className="h-16 flex items-center px-5 border-b border-slate-200">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-8 h-8 bg-blue-700 rounded flex items-center justify-center shrink-0">
+              <Activity className="w-4 h-4 text-white" />
             </div>
-            <div>
-              <h1 className="font-bold text-slate-800 leading-none tracking-tight">DPRMS</h1>
-              <span className="text-[10px] uppercase font-semibold tracking-wider text-slate-500">Secure Records</span>
+            <div className="min-w-0">
+              <h1 className="font-bold text-slate-800 text-xs leading-tight tracking-tight truncate" title="Decentralized Patient Record Management System">
+                Decentralized Patient
+              </h1>
+              <span className="text-[9px] uppercase font-semibold tracking-wider text-slate-500 block truncate">
+                Record Management System
+              </span>
             </div>
           </div>
         </div>
