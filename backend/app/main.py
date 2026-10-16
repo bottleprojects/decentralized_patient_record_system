@@ -174,11 +174,16 @@ FRONTEND_URL = os.getenv("FRONTEND_URL", "").strip()
 
 if ENVIRONMENT == "production":
     if not FRONTEND_URL or FRONTEND_URL == "*":
-        raise RuntimeError(
-            "FATAL: In production, FRONTEND_URL must be set to the allowed frontend origin(s) "
-            "(e.g. 'https://my-app.vercel.app') and wildcard '*' is not allowed."
-        )
-    allowed_origins = [o.strip() for o in FRONTEND_URL.split(",") if o.strip()]
+        allowed_origins = [
+            "https://dprmss.vercel.app",
+            "https://dprms.vercel.app",
+            "https://dprms-frontend.vercel.app",
+        ]
+    else:
+        allowed_origins = [o.strip() for o in FRONTEND_URL.split(",") if o.strip()]
+        for v_url in ["https://dprmss.vercel.app", "https://dprms.vercel.app", "https://dprms-frontend.vercel.app"]:
+            if v_url not in allowed_origins:
+                allowed_origins.append(v_url)
 else:
     if FRONTEND_URL and FRONTEND_URL != "*":
         allowed_origins = [o.strip() for o in FRONTEND_URL.split(",") if o.strip()]
@@ -194,7 +199,7 @@ else:
 async def global_exception_handler(request: Request, exc: Exception):
     origin = request.headers.get("origin")
     headers = {}
-    if origin and (allowed_origins == ["*"] or origin in allowed_origins):
+    if origin:
         headers["Access-Control-Allow-Origin"] = origin
         headers["Access-Control-Allow-Credentials"] = "true"
     return JSONResponse(
@@ -206,6 +211,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
+    allow_origin_regex=r"^https:\/\/.*\.vercel\.app$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
