@@ -11,6 +11,7 @@ import DoctorDashboard from './pages/DoctorDashboard';
 import DoctorPatientView from './pages/DoctorPatientView';
 import AdminDashboard from './pages/AdminDashboard';
 import MetricsAnalyticsPanel from './components/MetricsAnalyticsPanel';
+import TimingDebugOverlay from './components/TimingDebugOverlay';
 
 function App() {
   return (
@@ -34,9 +35,11 @@ function App() {
         <Route path="/" element={<Navigate to="/login" replace />} />
         <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>
+      <TimingDebugOverlay />
       <Analytics />
     </BrowserRouter>
   );
 }
 
 export default App;
+

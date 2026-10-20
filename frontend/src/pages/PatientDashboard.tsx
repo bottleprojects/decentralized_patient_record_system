@@ -137,6 +137,7 @@ export default function PatientDashboard() {
     setUploadError(null);
     setUploading(true);
     setUploadProgress(10);
+    const uploadStart = performance.now();
 
     try {
       const formData = new FormData();
@@ -148,6 +149,11 @@ export default function PatientDashboard() {
       setUploadProgress(40);
 
       await fetchApi(endpoint, { method: 'POST', body: formData });
+
+      const durationMs = performance.now() - uploadStart;
+      window.dispatchEvent(new CustomEvent('dprms-benchmark-timing', {
+        detail: { operation: 'Record Upload (IPFS)', durationMs, details: uploadFile.name }
+      }));
 
       setUploadProgress(90);
       setIsUploadModalOpen(false);
@@ -164,6 +170,7 @@ export default function PatientDashboard() {
   };
 
   const handleIPFSDownload = async (record: any) => {
+    const downloadStart = performance.now();
     try {
       setDownloadingRecordId(record.id);
       setIntegrityResults(prev => ({ ...prev, [record.id]: null }));
@@ -203,6 +210,11 @@ export default function PatientDashboard() {
       }
 
       const blob = await response.blob();
+      const durationMs = performance.now() - downloadStart;
+      window.dispatchEvent(new CustomEvent('dprms-benchmark-timing', {
+        detail: { operation: 'Record Download (IPFS)', durationMs, details: filename }
+      }));
+
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url; a.download = filename;
