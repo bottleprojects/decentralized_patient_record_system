@@ -168,23 +168,24 @@ def verify_doctor(user_id: int, status: str = "verified", db: Session = Depends(
 
 @router.delete("/admin/cleanup")
 def cleanup_database(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    env = os.getenv("ENVIRONMENT", "development").lower()
-    if env == "production":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Database cleanup is permanently disabled in the production environment."
-        )
-
     if current_user.role != RoleEnum.admin:
         raise HTTPException(status_code=403, detail="Not authorized. Admins only.")
     
     try:
-        from ..models import AuditLog, Consent, MedicalRecord
+        from ..models import (
+            Observation, Diagnosis, Prescription, ConsentRequest,
+            Consent, AuditLog, MedicalRecord, BlockchainTransactionCounter
+        )
         
-        # Delete dependent tables first
-        db.query(AuditLog).delete()
+        # Delete dependent tables first in proper dependency order
+        db.query(Observation).delete()
+        db.query(Diagnosis).delete()
+        db.query(Prescription).delete()
+        db.query(ConsentRequest).delete()
         db.query(Consent).delete()
+        db.query(AuditLog).delete()
         db.query(MedicalRecord).delete()
+        db.query(BlockchainTransactionCounter).delete()
         
         # Delete all non-admin users
         db.query(User).filter(User.role != RoleEnum.admin).delete()
@@ -198,13 +199,7 @@ def cleanup_database(db: Session = Depends(get_db), current_user: User = Depends
 @router.post("/reset-demo")
 @router.delete("/reset-demo")
 def reset_demo(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    """Reset demo endpoint - permanently disabled in production, admin only in dev."""
-    env = os.getenv("ENVIRONMENT", "development").lower()
-    if env == "production":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Reset demo endpoint is disabled in production."
-        )
+    """Reset demo endpoint - admin only."""
     return cleanup_database(db=db, current_user=current_user)
 
 @router.delete("/{user_id}")
