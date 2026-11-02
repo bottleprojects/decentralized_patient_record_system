@@ -17,7 +17,7 @@ A privacy-preserving, decentralized electronic health record (EHR) and biometric
 The system operates across four coordinated tiers:
 
 1. **Biomedical Edge Layer (ESP32 IoT Gateway)**:
-   - **AD8232 ECG Sensor**: Sampled at 500 Hz on ADC1 via a deterministic, $O(1)$ statically-allocated lockless ISR ring buffer (zero heap allocations in interrupt context).
+   - **AD8232 ECG Sensor**: Sampled at 500 Hz on ADC1 via a deterministic, `O(1)` statically-allocated lockless ISR ring buffer (zero heap allocations in interrupt context).
    - **MAX30102 PPG Sensor**: Optical pulse oximetry sampled at 100 Hz over I2C (400 kHz Fast-Mode) measuring SpO2 and pulse rate.
    - **Edge Attestation**: Telemetry packets signed with hardware-accelerated HMAC-SHA256 and transmitted over TLS/HTTPS to the backend ingestion endpoint.
 
@@ -39,12 +39,12 @@ The system operates across four coordinated tiers:
 ## Core Capabilities
 
 - **Hybrid Decentralized Storage**: Encrypted biomedical documents and physiological telemetry are stored off-chain via Pinata IPFS using randomized content identifiers (`enc_<uuid>.bin`). Public blockchain storage holds only cryptographic proofs (SHA-256 digests, IPFS CIDs, and hardware provenance hashes), guaranteeing zero Protected Health Information (PHI) or Personally Identifiable Information (PII) on-chain.
-- **Hardware-Rooted Provenance ($H_{acq}$)**: Biomedical data captured by ESP32 sensors (AD8232 ECG and MAX30102 PPG) is signed at the edge using hardware-accelerated HMAC-SHA256 tags. Measurement sessions produce canonical JSON acquisition manifests whose SHA-256 digests ($H_{acq}$) are anchored alongside clinical records on-chain.
+- **Hardware-Rooted Provenance (`H_acq`)**: Biomedical data captured by ESP32 sensors (AD8232 ECG and MAX30102 PPG) is signed at the edge using hardware-accelerated HMAC-SHA256 tags. Measurement sessions produce canonical JSON acquisition manifests whose SHA-256 digests (`H_acq`) are anchored alongside clinical records on-chain.
 - **AES-256-GCM Authenticated Encryption**: Document payloads are encrypted symmetrically using AES-256-GCM with randomized 96-bit initialization vectors and 128-bit authentication tags prior to IPFS distribution.
 - **Dynamic Patient Consent & Break-Glass Protocol**: Granular patient-controlled consent and revocation for physicians. Includes a secure break-glass emergency override protocol requiring verified doctor credentials, substantive clinical justification (minimum 15 characters), a strict 24-hour expiration window, and immutable audit logging.
 - **FHIR R4 Interoperability**: Native FHIR endpoints (`/fhir` and `/fhir/v4`) export standards-conformant `Patient` and `Observation` resources mapped to official LOINC codes (`8867-4` Heart Rate, `2708-6` SpO2, `8889-8` ECG Rhythm) and UCUM unit specifications, strictly gated by active patient consent.
-- **Saga Orchestration & Nonce Management**: Multi-phase resilient upload workflow (`pending_upload` &rarr; `pending_anchor` &rarr; `confirming` &rarr; `confirmed`) with auto-recovery retry endpoints (`POST /records/{id}/retry-anchor`) and thread-safe nonce locking to prevent transaction collisions.
-- **High-Performance Interrupt Handling**: ESP32 C++ firmware employs an $O(1)$ statically-allocated lockless ring buffer inside the 500 Hz hardware timer ISR, avoiding dynamic heap allocation (`malloc`/`push_back`) to guarantee deterministic sampling without interrupt watchdog panics.
+- **Saga Orchestration & Nonce Management**: Multi-phase resilient upload workflow (`pending_upload` -> `pending_anchor` -> `confirming` -> `confirmed`) with auto-recovery retry endpoints (`POST /records/{id}/retry-anchor`) and thread-safe nonce locking to prevent transaction collisions.
+- **High-Performance Interrupt Handling**: ESP32 C++ firmware employs an `O(1)` statically-allocated lockless ring buffer inside the 500 Hz hardware timer ISR, avoiding dynamic heap allocation (`malloc`/`push_back`) to guarantee deterministic sampling without interrupt watchdog panics.
 
 ---
 
@@ -177,8 +177,8 @@ decentralized_patient_record_system/
 ### 5. Hardware & ESP32 Firmware Setup
 
 1. Connect the AD8232 and MAX30102 sensors to the ESP32:
-   - **MAX30102 (I2C)**: SDA &rarr; GPIO 21, SCL &rarr; GPIO 22, VIN &rarr; 3.3V, GND &rarr; GND.
-   - **AD8232 (ECG)**: OUTPUT &rarr; GPIO 36 (ADC1), LO+ &rarr; GPIO 34, LO- &rarr; GPIO 35, SDN &rarr; GPIO 32.
+   - **MAX30102 (I2C)**: SDA -> GPIO 21, SCL -> GPIO 22, VIN -> 3.3V, GND -> GND.
+   - **AD8232 (ECG)**: OUTPUT -> GPIO 36 (ADC1), LO+ -> GPIO 34, LO- -> GPIO 35, SDN -> GPIO 32.
 2. Open `firmware/` in PlatformIO or `hardware/esp32_firmware/esp32_firmware.ino` in Arduino IDE.
 3. Update Wi-Fi SSID, password, and backend gateway URL in `firmware/include/config.h`.
 4. Flash the microcontroller:
