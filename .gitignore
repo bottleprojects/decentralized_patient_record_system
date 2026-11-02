@@ -16,5 +16,7 @@ coverage/
 test.json
 *.db
 .DS_Store
-*.ino
+# Firmware & Hardware
 firmware/
+*.ino
+!hardware/esp32_firmware/esp32_firmware.ino
