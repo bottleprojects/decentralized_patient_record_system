@@ -35,26 +35,31 @@ export function generateVitalsPdfFile(data: VitalsReportData): File {
   const localIso = new Date(dateObj.getTime() - tzOffsetMs).toISOString().slice(0, 19);
 
   const isSynthetic = Boolean(data.isSynthetic || data.sensorMode === 'SYNTHETIC_SIMULATION' || data.sensorMode === 'CALIBRATED_FALLBACK');
-  const heartRate = data.heartRate || 74;
-  const spo2 = data.spo2 || 98;
-  const rhythm = data.rhythm || (isSynthetic ? 'Simulated Sinus Rhythm (Synthetic Model - Fallback)' : 'Normal Sinus Rhythm (Regular PQRST Morphology)');
+  const heartRate = data.heartRate ? `${data.heartRate} BPM` : 'UNAVAILABLE (No Sensor Signal)';
+  const spo2 = data.spo2 ? `${data.spo2}%` : 'UNAVAILABLE (No Sensor Signal)';
+  const rhythm = data.rhythm || (isSynthetic ? 'Simulated Telemetry (Demonstration Model - Not Actual Reading)' : 'Raw Telemetry / Uninterpreted (Physician Review Required)');
   const hardwareStr = isSynthetic
-    ? 'SYNTHETIC TEST BENCH (No Hardware Sensor Attached - Fallback Values)'
+    ? 'SYNTHETIC TEST BENCH (Simulated Demonstration Model)'
     : 'ESP32-VITALS-01 | MAX30102 Optical SpO2 + AD8232 Lead-II ECG';
 
   // Ensure 160+ continuous ECG samples for full-width clinical grid rendering
   let samples = data.ecgSamples && data.ecgSamples.length > 0 ? [...data.ecgSamples] : [];
   if (samples.length === 0) {
-    // Generate mathematically synthesized 160-point PQRST waveform
-    for (let i = 0; i < 160; i++) {
-      const cycle = (i % 40) / 40;
-      let y = 0;
-      if (cycle > 0.12 && cycle < 0.22) y += 0.18 * Math.sin(((cycle - 0.12) / 0.10) * Math.PI);
-      else if (cycle >= 0.28 && cycle < 0.31) y -= 0.15 * Math.sin(((cycle - 0.28) / 0.03) * Math.PI);
-      else if (cycle >= 0.31 && cycle < 0.36) y += 1.0 * Math.sin(((cycle - 0.31) / 0.05) * Math.PI);
-      else if (cycle >= 0.36 && cycle < 0.40) y -= 0.25 * Math.sin(((cycle - 0.36) / 0.04) * Math.PI);
-      else if (cycle > 0.50 && cycle < 0.68) y += 0.32 * Math.sin(((cycle - 0.50) / 0.18) * Math.PI);
-      samples.push(Math.round(2048 + y * 900));
+    if (isSynthetic) {
+      // Generate mathematically synthesized 160-point demonstration waveform
+      for (let i = 0; i < 160; i++) {
+        const cycle = (i % 40) / 40;
+        let y = 0;
+        if (cycle > 0.12 && cycle < 0.22) y += 0.18 * Math.sin(((cycle - 0.12) / 0.10) * Math.PI);
+        else if (cycle >= 0.28 && cycle < 0.31) y -= 0.15 * Math.sin(((cycle - 0.28) / 0.03) * Math.PI);
+        else if (cycle >= 0.31 && cycle < 0.36) y += 1.0 * Math.sin(((cycle - 0.31) / 0.05) * Math.PI);
+        else if (cycle >= 0.36 && cycle < 0.40) y -= 0.25 * Math.sin(((cycle - 0.36) / 0.04) * Math.PI);
+        else if (cycle > 0.50 && cycle < 0.68) y += 0.32 * Math.sin(((cycle - 0.50) / 0.18) * Math.PI);
+        samples.push(Math.round(2048 + y * 900));
+      }
+    } else {
+      // Live hardware with no samples: display flatline baseline 2048 (no fabricated PQRST)
+      samples = new Array(160).fill(2048);
     }
   } else if (samples.length < 160) {
     const orig = [...samples];

@@ -612,6 +612,8 @@ export default function VitalsCaptureModal({
       formData.append('patient_id', String(effectivePatientId));
       formData.append('file_type', 'Observation (Vitals)');
       formData.append('description', reportDesc);
+      formData.append('acquisition_source', isUsingSyntheticFallback ? 'DEMO_SIMULATED' : 'LIVE_HARDWARE');
+      formData.append('device_id', telemetry?.device_id || 'ESP32-VITALS-01');
 
       const res = await fetchApi('/records', {
         method: 'POST',

@@ -125,6 +125,9 @@ class BlockchainService:
         Poll for a transaction receipt every _RECEIPT_POLL_INTERVAL seconds.
         Raises RuntimeError if timeout exceeded or if transaction status != 1.
         """
+        if self.simulate_blockchain or not self.w3:
+            return {"status": 1, "transactionHash": tx_hash, "blockNumber": 1234567, "gasUsed": 87412}
+
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             try:
