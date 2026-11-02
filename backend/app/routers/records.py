@@ -159,17 +159,28 @@ async def upload_record(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"IPFS upload failed: {str(e)}")
 
-    # B0.1 — Broadcast Sepolia tx (returns immediately after send_raw_transaction; no wait)
+    # B0.1 — Broadcast Sepolia tx with hardware acquisition provenance if present
     tx_hash = None
     try:
-        tx_hash = blockchain_service.store_ipfs_record(
-            cid,
-            cid,
-            original_hash,
-            _ONCHAIN_FILE_NAME_LABEL,   # B0.3: generic label, not the real filename
-            file_type,                  # category tag (no PII) kept on-chain
-            len(file_bytes),            # original size (no PII) kept on-chain
-        )
+        if acquisition_hash:
+            tx_hash = blockchain_service.store_ipfs_record_with_provenance(
+                cid,
+                cid,
+                original_hash,
+                acquisition_hash,
+                _ONCHAIN_FILE_NAME_LABEL,   # B0.3: generic label, not the real filename
+                file_type,                  # category tag (no PII) kept on-chain
+                len(file_bytes),            # original size (no PII) kept on-chain
+            )
+        else:
+            tx_hash = blockchain_service.store_ipfs_record(
+                cid,
+                cid,
+                original_hash,
+                _ONCHAIN_FILE_NAME_LABEL,   # B0.3: generic label, not the real filename
+                file_type,                  # category tag (no PII) kept on-chain
+                len(file_bytes),            # original size (no PII) kept on-chain
+            )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Blockchain anchoring failed: {str(e)}")
 
@@ -476,10 +487,27 @@ def download_record(record_id: int, db: Session = Depends(get_db), current_user:
             headers={"X-Integrity-Verified": "false"},
         )
 
-    # Dual-Verification Check: If acquisition_hash is bound in DB, verify provenance
+    # Tier-2 Provenance Verification: If acquisition_hash is bound, verify against on-chain anchor
     if record.acquisition_hash:
-        # File has authenticated hardware provenance digest
-        pass
+        try:
+            prov_rec = blockchain_service.get_ipfs_provenance_record(record.ipfs_cid)
+            on_chain_acq = prov_rec.get("acquisition_hash")
+            if not on_chain_acq:
+                fallback_prov = blockchain_service.get_ipfs_provenance_record(str(record.id))
+                on_chain_acq = fallback_prov.get("acquisition_hash")
+            if on_chain_acq and on_chain_acq != record.acquisition_hash:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        "Tier-2 Provenance integrity check FAILED: Hardware acquisition manifest digest "
+                        "does not match the immutable provenance hash anchored on Sepolia."
+                    ),
+                    headers={"X-Integrity-Verified": "false"},
+                )
+        except HTTPException:
+            raise
+        except Exception:
+            pass
 
     integrity_ok = True
 

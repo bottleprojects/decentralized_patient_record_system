@@ -32,6 +32,7 @@ class BlockchainService:
     def __init__(self):
         self.simulate_blockchain = SIMULATE_BLOCKCHAIN
         self.max_daily_tx = int(os.getenv("MAX_DAILY_TRANSACTIONS", "50"))
+        self._simulated_records = {}
 
         is_default_cfg = any(p in str(x).lower() for x in [RPC_URL, PRIVATE_KEY, CONTRACT_ADDRESS] for p in ["your", "default", "example"])
         if not RPC_URL or not PRIVATE_KEY or not CONTRACT_ADDRESS or is_default_cfg or not Web3.is_address(CONTRACT_ADDRESS):
@@ -154,6 +155,7 @@ class BlockchainService:
         if not self.w3 or not self.w3.is_connected() or not self.contract:
             if self.simulate_blockchain:
                 print("NOTICE: Anchoring simulated via SIMULATE_BLOCKCHAIN=true.")
+                self._simulated_records[record_id] = {"sha256_hash": record_hash}
                 return f"0xsimulated_tx_{record_id[:8]}"
             raise RuntimeError(
                 "Blockchain service is not connected to Sepolia. Transaction cannot be anchored. "
@@ -180,6 +182,18 @@ class BlockchainService:
         if not self.w3 or not self.w3.is_connected() or not self.contract:
             if self.simulate_blockchain:
                 print("NOTICE: Anchoring simulated via SIMULATE_BLOCKCHAIN=true.")
+                rec_data = {
+                    "cid": cid,
+                    "sha256_hash": sha256_hash,
+                    "acquisition_hash": "",
+                    "file_name": file_name,
+                    "file_type": file_type,
+                    "file_size": file_size,
+                    "timestamp": int(datetime.utcnow().timestamp()),
+                    "version": 1,
+                }
+                self._simulated_records[record_id] = rec_data
+                self._simulated_records[cid] = rec_data
                 return f"0xsimulated_tx_{record_id[:8]}"
             raise RuntimeError(
                 "Blockchain service is not connected to Sepolia. Transaction cannot be anchored. "
@@ -191,6 +205,83 @@ class BlockchainService:
             )
         )
 
+    def store_ipfs_record_with_provenance(
+        self,
+        record_id: str,
+        cid: str,
+        sha256_hash: str,
+        acquisition_hash: str,
+        file_name: str,
+        file_type: str,
+        file_size: int,
+    ) -> str:
+        """
+        Stores IPFS metadata bound with hardware sensor acquisition provenance hash (H_acq) on-chain.
+        Returns the transaction hash immediately after broadcast.
+        """
+        if not self.w3 or not self.w3.is_connected() or not self.contract:
+            if self.simulate_blockchain:
+                print("NOTICE: Anchoring provenance record simulated via SIMULATE_BLOCKCHAIN=true.")
+                rec_data = {
+                    "cid": cid,
+                    "sha256_hash": sha256_hash,
+                    "acquisition_hash": acquisition_hash or "",
+                    "file_name": file_name,
+                    "file_type": file_type,
+                    "file_size": file_size,
+                    "timestamp": int(datetime.utcnow().timestamp()),
+                    "version": 1,
+                }
+                self._simulated_records[record_id] = rec_data
+                self._simulated_records[cid] = rec_data
+                return f"0xsimulated_tx_prov_{record_id[:8]}"
+            raise RuntimeError(
+                "Blockchain service is not connected to Sepolia. Transaction cannot be anchored. "
+                "Set SIMULATE_BLOCKCHAIN=true in development to mock anchoring."
+            )
+        return self._send_tx(
+            self.contract.functions.storeIPFSRecordWithProvenance(
+                record_id, cid, sha256_hash, acquisition_hash or "", file_name, file_type, file_size
+            )
+        )
+
+    def get_ipfs_provenance_record(self, record_id: str) -> dict:
+        """
+        Reads the anchored IPFS metadata and hardware provenance hash directly from the Sepolia contract.
+        """
+        if not self.w3 or not self.w3.is_connected() or not self.contract:
+            if self.simulate_blockchain:
+                if record_id in self._simulated_records:
+                    return self._simulated_records[record_id]
+                base_rec = self.get_ipfs_record(record_id)
+                return {
+                    "cid": base_rec.get("cid", "QmSimulatedCID"),
+                    "sha256_hash": base_rec.get("sha256_hash", "simulated_hash"),
+                    "acquisition_hash": base_rec.get("acquisition_hash", ""),
+                    "file_name": base_rec.get("file_name", "encrypted-record"),
+                    "file_type": base_rec.get("file_type", "PDF"),
+                    "file_size": base_rec.get("file_size", 1024),
+                    "timestamp": base_rec.get("timestamp", int(datetime.utcnow().timestamp())),
+                    "version": base_rec.get("version", 1),
+                }
+            raise RuntimeError("Blockchain service is not connected to Sepolia to verify on-chain record.")
+
+        try:
+            data = self.contract.functions.getIPFSProvenanceRecord(record_id).call()
+            return {
+                "cid": data[0],
+                "sha256_hash": data[1],
+                "acquisition_hash": data[2],
+                "file_name": data[3],
+                "file_type": data[4],
+                "file_size": data[5],
+                "timestamp": data[6],
+                "version": data[7],
+            }
+        except Exception:
+            # Fallback to standard getIPFSRecord if legacy record
+            return self.get_ipfs_record(record_id)
+
     def get_ipfs_record(self, record_id: str) -> dict:
         """
         Reads the anchored IPFS metadata directly from the Sepolia contract.
@@ -198,6 +289,8 @@ class BlockchainService:
         """
         if not self.w3 or not self.w3.is_connected() or not self.contract:
             if self.simulate_blockchain:
+                if record_id in self._simulated_records:
+                    return self._simulated_records[record_id]
                 return {
                     "cid": "QmSimulatedCID",
                     "sha256_hash": "simulated_hash",

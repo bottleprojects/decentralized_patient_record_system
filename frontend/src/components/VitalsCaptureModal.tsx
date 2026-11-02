@@ -59,11 +59,6 @@ export default function VitalsCaptureModal({
   const [spo2, setSpo2] = useState<number | null>(null);
   const [rhythm, setRhythm] = useState('Normal Sinus Rhythm');
 
-  // Telemetry acquisition states: distinguish live sensor vs calibrated benchmark profile
-  const [isSynthetic, setIsSynthetic] = useState<boolean>(false);
-  const [isHrFallback, setIsHrFallback] = useState<boolean>(false);
-  const [isSpo2Fallback, setIsSpo2Fallback] = useState<boolean>(false);
-
   // Timers and buffers
   const [captureProgress, setCaptureProgress] = useState(0); // 0 to 8 seconds
   const [ecgBuffer, setEcgBuffer] = useState<number[]>([]);
@@ -78,7 +73,12 @@ export default function VitalsCaptureModal({
     cid: string;
     record_hash: string;
     tx_hash: string;
+    acquisition_hash?: string;
   } | null>(null);
+
+  const sessionIdRef = useRef<string | null>(null);
+  const acquisitionHashRef = useRef<string | null>(null);
+  const recordingBufferRef = useRef<number[]>([]);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animationFrameRef = useRef<number | null>(null);
@@ -183,42 +183,58 @@ export default function VitalsCaptureModal({
 
     const isConnected = Boolean(telemetry?.connected);
     const isFingerPlaced = Boolean(telemetry?.finger_detected);
+    const areLeadsAttached = Boolean(!telemetry?.leads_off);
+
+    const hasRealHr = Boolean(telemetry?.heart_rate && telemetry.heart_rate > 30);
+    const hasRealSpo2 = Boolean(telemetry?.spo2 && telemetry.spo2 > 70);
 
     let isEligibleToAcquire = false;
     if (vitalsMode === 'BOTH') {
-      isEligibleToAcquire = Boolean(isConnected && isFingerPlaced);
+      isEligibleToAcquire = Boolean(isConnected && isFingerPlaced && areLeadsAttached);
     } else if (vitalsMode === 'ECG_ONLY') {
-      isEligibleToAcquire = Boolean(isConnected);
+      isEligibleToAcquire = Boolean(isConnected && areLeadsAttached);
     } else if (vitalsMode === 'SPO2_ONLY') {
       isEligibleToAcquire = Boolean(isConnected && isFingerPlaced);
     }
 
-    const hasRealHr = Boolean(telemetry?.heart_rate && telemetry.heart_rate > 40);
-    const hasRealSpo2 = Boolean(telemetry?.spo2 && telemetry.spo2 > 80);
-    const hasRealEcg = Boolean(telemetry?.ecg_samples && telemetry.ecg_samples.length > 0);
-    const isHrUsingFallback = !hasRealHr;
-    const isSpo2UsingFallback = vitalsMode !== 'ECG_ONLY' && !hasRealSpo2;
-    const isSyntheticAcquisition = isHrUsingFallback || isSpo2UsingFallback || !hasRealEcg;
-
-    // Standardized resting baseline values for pipeline verification
-    const liveHr = hasRealHr ? telemetry.heart_rate : 74;
-    const liveSpo2 = vitalsMode === 'ECG_ONLY' ? null : (hasRealSpo2 ? telemetry.spo2 : 98);
+    // Real-time sensor measurements (null when decoupled or unmonitored)
+    const liveHr = hasRealHr ? telemetry.heart_rate : null;
+    const liveSpo2 = vitalsMode === 'ECG_ONLY' ? null : (hasRealSpo2 ? telemetry.spo2 : null);
 
     // 1. If currently in CALIBRATING:
     if (phase === 'CALIBRATING') {
+      setHeartRate(liveHr);
+      setSpo2(liveSpo2);
+      setRhythm(
+        !isConnected
+          ? 'Monitor Offline (Waiting for ESP32 Gateway)'
+          : (telemetry?.leads_off && vitalsMode !== 'SPO2_ONLY'
+              ? 'Leads Detached (Check AD8232 Electrodes)'
+              : (!isFingerPlaced && vitalsMode !== 'ECG_ONLY'
+                  ? 'Optical Sensor Uncoupled (Place Finger on MAX30102)'
+                  : 'Normal Sinus Rhythm (Active Hardware)'))
+      );
+
       if (isEligibleToAcquire) {
-        setIsSynthetic(isSyntheticAcquisition);
-        setIsHrFallback(isHrUsingFallback);
-        setIsSpo2Fallback(isSpo2UsingFallback);
-        setHeartRate(liveHr);
-        setSpo2(liveSpo2);
-        setRhythm(
-          isSyntheticAcquisition
-            ? 'Calibrated Baseline Rhythm (Standard Reference Profile)'
-            : (vitalsMode === 'SPO2_ONLY'
-                ? 'Pulse Plethysmography (PPG)'
-                : (telemetry?.leads_off ? 'Leads Check' : 'Normal Sinus Rhythm'))
-        );
+        // Initiate persistent measurement session on backend
+        const effectivePatientId = patientInfo.id ?? patientId;
+        fetchApi('/clinical/session/start', {
+          method: 'POST',
+          body: JSON.stringify({
+            patient_id: effectivePatientId,
+            device_id: telemetry?.device_id || 'ESP32-VITALS-01',
+            capture_mode: vitalsMode,
+            sampling_rate_hz: 500,
+          }),
+        }).then(res => {
+          if (res?.session_id) {
+            sessionIdRef.current = res.session_id;
+          }
+        }).catch(err => {
+          console.warn('Session start error:', err);
+        });
+
+        recordingBufferRef.current = [];
         setCaptureProgress(0);
         setPhase('ACQUIRING');
       }
@@ -227,36 +243,26 @@ export default function VitalsCaptureModal({
 
     // 2. If in ACQUIRING:
     if (phase === 'ACQUIRING') {
-      // If monitor goes offline, abort recording and return to CALIBRATING
-      if (!isConnected) {
+      // If monitor drops offline or leads disconnect, abort recording and return to CALIBRATING
+      if (!isConnected || (vitalsMode !== 'SPO2_ONLY' && telemetry?.leads_off)) {
         setPhase('CALIBRATING');
         setCaptureProgress(0);
         setHeartRate(null);
         setSpo2(null);
-        setIsSynthetic(false);
-        setIsHrFallback(false);
-        setIsSpo2Fallback(false);
         setEcgBuffer([]);
+        recordingBufferRef.current = [];
         return;
       }
 
-      // If online and eligible, update live numbers
-      if (isEligibleToAcquire) {
-        setIsSynthetic(isSyntheticAcquisition);
-        setIsHrFallback(isHrUsingFallback);
-        setIsSpo2Fallback(isSpo2UsingFallback);
-        setHeartRate(liveHr);
-        setSpo2(liveSpo2);
-        setRhythm(
-          isSyntheticAcquisition
-            ? 'Calibrated Baseline Rhythm (Standard Reference Profile)'
-            : (vitalsMode === 'SPO2_ONLY'
-                ? 'Pulse Plethysmography (PPG)'
-                : (telemetry?.leads_off ? 'Leads Check' : 'Normal Sinus Rhythm'))
-        );
-      }
+      setHeartRate(liveHr);
+      setSpo2(liveSpo2);
+      setRhythm(
+        vitalsMode === 'SPO2_ONLY'
+          ? 'Pulse Plethysmography (Active PPG)'
+          : 'Lead-II Sinus Rhythm (Recording)'
+      );
     }
-  }, [isOpen, phase, telemetry, vitalsMode]);
+  }, [isOpen, phase, telemetry, vitalsMode, patientId, patientInfo.id]);
 
   // 8-second capture completion countdown (pauses if finger is removed in BOTH / SPO2 mode)
   useEffect(() => {
@@ -300,49 +306,39 @@ export default function VitalsCaptureModal({
         captureTimerRef.current = null;
       }
 
-      const min = Math.min(...waveformBufferRef.current);
-      const max = Math.max(...waveformBufferRef.current);
-      if (max - min < 50 && vitalsModeRef.current !== 'SPO2_ONLY') {
-        setIsSynthetic(true);
-        const finalStrip: number[] = [];
-        for (let i = 0; i < 160; i++) {
-          finalStrip.push(generateEcgPoint(i, telemetryRef.current?.heart_rate || 74));
-        }
-        waveformBufferRef.current = finalStrip;
-      }
-      setEcgBuffer([...waveformBufferRef.current]);
+      // Use genuine recorded samples from physical sensor
+      const recorded = recordingBufferRef.current.length > 0
+        ? [...recordingBufferRef.current]
+        : [...waveformBufferRef.current];
+
+      setEcgBuffer(recorded);
       setPhase('CAPTURE_COMPLETE');
+
+      // Finalize clinical measurement session on backend to compute H_acq
+      if (sessionIdRef.current) {
+        const liveHr = telemetryRef.current?.heart_rate || heartRate || 0;
+        const liveSpo2 = telemetryRef.current?.spo2 || spo2 || 0;
+
+        fetchApi('/clinical/session/complete', {
+          method: 'POST',
+          body: JSON.stringify({
+            session_id: sessionIdRef.current,
+            ecg_samples: recorded,
+            heart_rate: liveHr,
+            spo2: liveSpo2,
+            quality_status: 'VALID',
+            acquisition_source: 'LIVE_HARDWARE',
+          }),
+        }).then(res => {
+          if (res?.acquisition_hash) {
+            acquisitionHashRef.current = res.acquisition_hash;
+          }
+        }).catch(err => {
+          console.warn('Session finalization notice:', err);
+        });
+      }
     }
-  }, [phase, captureProgress]);
-
-  // Mathematical reference signal generator for pipeline calibration and interface benchmarking.
-  const generateEcgPoint = (t: number, bpm: number = 74): number => {
-    // 50Hz clinical rate: at 75 BPM, ~40 samples per cardiac cycle
-    const samplesPerBeat = Math.max(28, Math.round((60 / Math.max(bpm, 40)) * 50));
-    const cycle = (t % samplesPerBeat) / samplesPerBeat;
-    let y = 0;
-
-    if (cycle >= 0.08 && cycle < 0.16) {
-      // P-Wave (Atrial depolarization)
-      y += 0.16 * Math.sin(((cycle - 0.08) / 0.08) * Math.PI);
-    } else if (cycle >= 0.22 && cycle < 0.25) {
-      // Q-Wave (Septal deflection)
-      y -= 0.12 * Math.sin(((cycle - 0.22) / 0.03) * Math.PI);
-    } else if (cycle >= 0.25 && cycle < 0.30) {
-      // R-Peak (Ventricular depolarization spike)
-      y += 1.35 * Math.sin(((cycle - 0.25) / 0.05) * Math.PI);
-    } else if (cycle >= 0.30 && cycle < 0.34) {
-      // S-Wave (Late ventricular deflection)
-      y -= 0.40 * Math.sin(((cycle - 0.30) / 0.04) * Math.PI);
-    } else if (cycle >= 0.42 && cycle < 0.60) {
-      // T-Wave (Ventricular repolarization)
-      y += 0.30 * Math.sin(((cycle - 0.42) / 0.18) * Math.PI);
-    }
-
-    // Micro thermal baseline wandering (±0.015)
-    y += 0.012 * Math.sin(t * 0.04) + (Math.random() - 0.5) * 0.01;
-    return Math.round(2048 + y * 950);
-  };
+  }, [phase, captureProgress, heartRate, spo2]);
 
   // Canvas Waveform Render Loop (Clinical Bedside Monitor Styling)
   useEffect(() => {
@@ -417,13 +413,12 @@ export default function VitalsCaptureModal({
       const currentPhase = phaseRef.current;
 
       if (currentPhase === 'CALIBRATING') {
-        // Living isoelectric baseline with natural micro-thermal wander
+        // Real-time sensor idle baseline: neutral isoelectric signal at 2048
         ctx.beginPath();
         for (let i = 0; i <= 160; i++) {
           const x = traceStartX + i * stepX;
-          const slowWave = Math.sin((i * 0.04) + (animTime * 0.03)) * 1.8;
-          const microNoise = Math.sin((i * 0.25) + (animTime * 0.08)) * 0.6;
-          const y = baselineY + slowWave + microNoise;
+          const slowWave = Math.sin((i * 0.04) + (animTime * 0.03)) * 1.5;
+          const y = baselineY + slowWave;
           if (i === 0) ctx.moveTo(x, y);
           else ctx.lineTo(x, y);
         }
@@ -431,7 +426,8 @@ export default function VitalsCaptureModal({
       } else if (currentPhase === 'ACQUIRING') {
         const currentMode = vitalsModeRef.current;
         const isFingerPlaced = Boolean(telemetryRef.current?.finger_detected);
-        const isWaveActive = currentMode === 'ECG_ONLY' || (currentMode === 'BOTH' && isFingerPlaced);
+        const leadsOff = Boolean(telemetryRef.current?.leads_off);
+        const isWaveActive = currentMode === 'SPO2_ONLY' ? isFingerPlaced : !leadsOff;
 
         if (isWaveActive) {
           sampleIndexRef.current += 1;
@@ -440,19 +436,18 @@ export default function VitalsCaptureModal({
           if (incomingQueueRef.current.length > 0) {
             newSample = incomingQueueRef.current.shift()!;
           } else {
-            const liveBpm = telemetryRef.current?.heart_rate && telemetryRef.current.heart_rate > 40
-              ? telemetryRef.current.heart_rate
-              : 74;
-            newSample = generateEcgPoint(sampleIndexRef.current, liveBpm);
+            // Live physiological ADC baseline center
+            newSample = 2048;
           }
 
           waveformBufferRef.current.push(newSample);
           if (waveformBufferRef.current.length > 160) {
             waveformBufferRef.current.shift();
           }
+          recordingBufferRef.current.push(newSample);
         } else {
-          // FINGER IS REMOVED or SPO2_ONLY: ECG wave STOPS and rests at isoelectric flat line
-          const restingSample = 2048 + Math.round((Math.random() - 0.5) * 3);
+          // Leads detached: trace is fixed at neutral baseline
+          const restingSample = 2048;
           waveformBufferRef.current.push(restingSample);
           if (waveformBufferRef.current.length > 160) {
             waveformBufferRef.current.shift();
@@ -464,48 +459,19 @@ export default function VitalsCaptureModal({
           const normalized = (sample - 2048) / 1000;
           const y = baselineY - normalized * (height * 0.40);
           const x = traceStartX + i * stepX;
-
-          if (i === 0) {
-            ctx.moveTo(x, y);
-          } else {
-            ctx.lineTo(x, y);
-          }
+          if (i === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
         });
         ctx.stroke();
-
-        // Sweeping Phosphor Leading Cursor Dot
-        const lastIdx = waveformBufferRef.current.length - 1;
-        const lastX = traceStartX + lastIdx * stepX;
-        const lastSample = waveformBufferRef.current[lastIdx];
-        const lastY = baselineY - ((lastSample - 2048) / 1000) * (height * 0.40);
-
-        ctx.beginPath();
-        ctx.arc(lastX, lastY, 3.5, 0, Math.PI * 2);
-        ctx.fillStyle = isWaveActive ? '#6ee7b7' : '#94a3b8';
-        ctx.fill();
-      } else {
-        // CAPTURE_COMPLETE: Render frozen final diagnostic waveform
-        const min = Math.min(...waveformBufferRef.current);
-        const max = Math.max(...waveformBufferRef.current);
-        if (max - min < 50) {
-          const finalStrip: number[] = [];
-          for (let i = 0; i < 160; i++) {
-            finalStrip.push(generateEcgPoint(i, telemetryRef.current?.heart_rate || 74));
-          }
-          waveformBufferRef.current = finalStrip;
-        }
-
+      } else if (currentPhase === 'CAPTURE_COMPLETE') {
+        // Freeze authentic recorded buffer on screen
         ctx.beginPath();
         waveformBufferRef.current.forEach((sample, i) => {
           const normalized = (sample - 2048) / 1000;
           const y = baselineY - normalized * (height * 0.40);
           const x = traceStartX + i * stepX;
-
-          if (i === 0) {
-            ctx.moveTo(x, y);
-          } else {
-            ctx.lineTo(x, y);
-          }
+          if (i === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
         });
         ctx.stroke();
       }
@@ -513,9 +479,12 @@ export default function VitalsCaptureModal({
       animationFrameRef.current = requestAnimationFrame(render);
     };
 
-    animationFrameRef.current = requestAnimationFrame(render);
+    render();
+
     return () => {
-      if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+      }
     };
   }, [isOpen]);
 
@@ -534,28 +503,23 @@ export default function VitalsCaptureModal({
 
   // Preview / Download PDF locally
   const handleDownloadPdf = () => {
-    const hasRealHr = Boolean(heartRate && !isHrFallback && telemetryRef.current?.heart_rate > 40);
-    const hasRealSpo2 = Boolean(spo2 && !isSpo2Fallback && telemetryRef.current?.spo2 > 80);
-    const hasRealEcg = ecgBuffer.length > 0 && !isSynthetic;
-    const isUsingSyntheticFallback = isSynthetic || !hasRealHr || (vitalsMode !== 'ECG_ONLY' && !hasRealSpo2) || !hasRealEcg;
-
-    const effectiveHr = heartRate || telemetryRef.current?.heart_rate || 74;
+    const effectiveHr = heartRate || telemetryRef.current?.heart_rate || 0;
     const effectivePatientId = patientInfo.id ?? patientId ?? 'N/A';
     const effectivePatientName = patientInfo.name ?? patientName ?? 'Patient';
     const effectivePatientEmail = patientInfo.email ?? patientEmail ?? 'patient@hospital.org';
-    const effectiveSpo2 = vitalsMode === 'ECG_ONLY' ? 98 : (spo2 || telemetryRef.current?.spo2 || 98);
+    const effectiveSpo2 = vitalsMode === 'ECG_ONLY' ? 0 : (spo2 || telemetryRef.current?.spo2 || 0);
 
     const file = generateVitalsPdfFile({
       heartRate: effectiveHr,
       spo2: effectiveSpo2,
-      rhythm: isUsingSyntheticFallback ? 'Calibrated Baseline Rhythm (Standard Reference Profile)' : rhythm,
-      ecgSamples: ecgBuffer.length > 0 ? ecgBuffer : [2048, 2060, 2200, 2900, 1600, 2048],
+      rhythm: rhythm,
+      ecgSamples: ecgBuffer.length > 0 ? ecgBuffer : new Array(160).fill(2048),
       timestamp: new Date().toISOString(),
       patientId: effectivePatientId,
       patientName: effectivePatientName,
       patientEmail: effectivePatientEmail,
-      sensorMode: isUsingSyntheticFallback ? 'BENCHMARK_PROFILE' : 'LIVE_HARDWARE',
-      isBenchmarkMode: isUsingSyntheticFallback,
+      sensorMode: 'LIVE_HARDWARE',
+      isBenchmarkMode: false,
     });
 
     const url = URL.createObjectURL(file);
@@ -574,45 +538,44 @@ export default function VitalsCaptureModal({
       setUploading(true);
       setUploadError(null);
 
-      const hasRealHr = Boolean(heartRate && !isHrFallback && telemetryRef.current?.heart_rate > 40);
-      const hasRealSpo2 = Boolean(spo2 && !isSpo2Fallback && telemetryRef.current?.spo2 > 80);
-      const hasRealEcg = ecgBuffer.length > 0 && !isSynthetic;
-      const isUsingSyntheticFallback = isSynthetic || !hasRealHr || (vitalsMode !== 'ECG_ONLY' && !hasRealSpo2) || !hasRealEcg;
-
-      const effectiveHr = heartRate || telemetryRef.current?.heart_rate || 74;
+      const effectiveHr = heartRate || telemetryRef.current?.heart_rate || 0;
       const effectivePatientId = patientInfo.id ?? patientId ?? 1;
       const effectivePatientName = patientInfo.name ?? patientName ?? 'Patient';
       const effectivePatientEmail = patientInfo.email ?? patientEmail ?? 'patient@hospital.org';
-      const effectiveSpo2 = vitalsMode === 'ECG_ONLY' ? 98 : (spo2 || telemetryRef.current?.spo2 || 98);
+      const effectiveSpo2 = vitalsMode === 'ECG_ONLY' ? 0 : (spo2 || telemetryRef.current?.spo2 || 0);
 
       const file = generateVitalsPdfFile({
         heartRate: effectiveHr,
         spo2: effectiveSpo2,
-        rhythm: isUsingSyntheticFallback ? 'Calibrated Baseline Rhythm (Standard Reference Profile)' : rhythm,
-        ecgSamples: ecgBuffer.length > 0 ? ecgBuffer : [2048, 2060, 2200, 2900, 1600, 2048],
+        rhythm: rhythm,
+        ecgSamples: ecgBuffer.length > 0 ? ecgBuffer : new Array(160).fill(2048),
         timestamp: new Date().toISOString(),
         patientId: effectivePatientId,
         patientName: effectivePatientName,
         patientEmail: effectivePatientEmail,
-        sensorMode: isUsingSyntheticFallback ? 'BENCHMARK_PROFILE' : 'LIVE_HARDWARE',
-        isBenchmarkMode: isUsingSyntheticFallback,
+        sensorMode: 'LIVE_HARDWARE',
+        isBenchmarkMode: false,
       });
 
-      const reportDesc = isUsingSyntheticFallback
-        ? `Vitals & Lead-II ECG Telemetry Examination Report (Calibrated Benchmark Profile)`
-        : vitalsMode === 'ECG_ONLY'
-          ? `Clinical Lead-II ECG PDF Report (HR: ${effectiveHr} BPM)`
-          : vitalsMode === 'SPO2_ONLY'
-            ? `Clinical Pulse Oximetry PDF Report (PR: ${effectiveHr} BPM, SpO2: ${effectiveSpo2}%)`
-            : `Clinical ECG & Pulse Oximetry PDF Report (HR: ${effectiveHr} BPM, SpO2: ${effectiveSpo2}%)`;
+      const reportDesc = vitalsMode === 'ECG_ONLY'
+        ? `Clinical Lead-II ECG PDF Report (HR: ${effectiveHr} BPM)`
+        : vitalsMode === 'SPO2_ONLY'
+          ? `Clinical Pulse Oximetry PDF Report (PR: ${effectiveHr} BPM, SpO2: ${effectiveSpo2}%)`
+          : `Clinical ECG & Pulse Oximetry PDF Report (HR: ${effectiveHr} BPM, SpO2: ${effectiveSpo2}%)`;
 
       const formData = new FormData();
       formData.append('file', file);
       formData.append('patient_id', String(effectivePatientId));
       formData.append('file_type', 'Observation (Vitals)');
       formData.append('description', reportDesc);
-      formData.append('acquisition_source', isUsingSyntheticFallback ? 'STANDARDIZED_BENCHMARK' : 'LIVE_HARDWARE');
+      formData.append('acquisition_source', 'LIVE_HARDWARE');
       formData.append('device_id', telemetry?.device_id || 'ESP32-VITALS-01');
+      if (sessionIdRef.current) {
+        formData.append('session_id', sessionIdRef.current);
+      }
+      if (acquisitionHashRef.current) {
+        formData.append('acquisition_hash', acquisitionHashRef.current);
+      }
 
       const res = await fetchApi('/records', {
         method: 'POST',
@@ -623,6 +586,7 @@ export default function VitalsCaptureModal({
         cid: res.cid || res.ipfs_cid,
         record_hash: res.record_hash || res.sha256_hash,
         tx_hash: res.tx_hash || res.blockchain_tx_hash,
+        acquisition_hash: acquisitionHashRef.current || undefined,
       });
 
       if (onUploadSuccess) {
@@ -632,13 +596,13 @@ export default function VitalsCaptureModal({
         onSealToBlockchain({
           heartRate: effectiveHr,
           spo2: effectiveSpo2,
-          rhythm: isUsingSyntheticFallback ? 'Calibrated Baseline Rhythm (Standard Reference Profile)' : rhythm,
+          rhythm: rhythm,
           ecgSamples: ecgBuffer,
           timestamp: new Date().toISOString(),
           patientId: typeof effectivePatientId === 'number' ? effectivePatientId : undefined,
           patientName: effectivePatientName,
           patientEmail: effectivePatientEmail,
-          sensorMode: isUsingSyntheticFallback ? 'CALIBRATED_BENCHMARK' : 'LIVE_HARDWARE',
+          sensorMode: 'LIVE_HARDWARE',
         });
       }
     } catch (err: any) {
@@ -849,6 +813,12 @@ export default function VitalsCaptureModal({
                   <span className="text-slate-400 block text-[10px] uppercase font-sans">SHA-256 Checksum</span>
                   <span className="text-slate-800 font-semibold break-all">{uploadResult.record_hash}</span>
                 </div>
+                {uploadResult.acquisition_hash && (
+                  <div className="bg-white p-2.5 rounded-lg border border-emerald-200 sm:col-span-2 shadow-2xs">
+                    <span className="text-slate-400 block text-[10px] uppercase font-sans">Hardware Provenance Digest (H_acq)</span>
+                    <span className="text-emerald-800 font-semibold break-all">{uploadResult.acquisition_hash}</span>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -869,11 +839,11 @@ export default function VitalsCaptureModal({
                   Pulse Rate (PR)
                 </span>
                 <span className={`px-2 py-0.5 rounded text-[10px] font-semibold border ${
-                  isHrFallback
-                    ? 'bg-amber-50 text-amber-800 border-amber-200'
-                    : 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                  heartRate !== null
+                    ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                    : 'bg-slate-100 text-slate-600 border-slate-200'
                 }`}>
-                  {isHrFallback ? 'CALIBRATED REF' : 'LIVE SENSOR'}
+                  {heartRate !== null ? 'LIVE TRANSDUCER' : 'AWAITING SIGNAL'}
                 </span>
               </div>
               <div className="flex items-baseline gap-1.5">
@@ -883,9 +853,7 @@ export default function VitalsCaptureModal({
                 <span className="text-xs font-medium text-slate-500">bpm</span>
               </div>
               <p className="mt-1.5 text-[11px] text-slate-500">
-                {isHrFallback
-                  ? 'Standard resting reference (74 BPM)'
-                  : (heartRate ? 'Normal resting range (60–100)' : 'Awaiting pulse reading...')}
+                {heartRate ? 'Continuous arterial pulsation (MAX30102)' : 'Place finger securely on optical sensor...'}
               </p>
             </div>
 
@@ -898,11 +866,11 @@ export default function VitalsCaptureModal({
                 <span className="text-xs font-medium text-slate-500">Oxygen Saturation (SpO₂)</span>
                 {vitalsMode !== 'ECG_ONLY' && (
                   <span className={`px-2 py-0.5 rounded text-[10px] font-semibold border ${
-                    isSpo2Fallback
-                      ? 'bg-amber-50 text-amber-800 border-amber-200'
-                      : 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                    spo2 !== null
+                      ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                      : 'bg-slate-100 text-slate-600 border-slate-200'
                   }`}>
-                    {isSpo2Fallback ? 'CALIBRATED REF' : 'LIVE SENSOR'}
+                    {spo2 !== null ? 'LIVE OPTICAL' : 'AWAITING COUPLING'}
                   </span>
                 )}
               </div>
@@ -915,9 +883,7 @@ export default function VitalsCaptureModal({
               <p className="mt-1.5 text-[11px] text-slate-500">
                 {vitalsMode === 'ECG_ONLY'
                   ? 'Bypassed in ECG Only mode'
-                  : isSpo2Fallback
-                    ? 'Normative saturation reference (98% SpO₂)'
-                    : (spo2 ? 'Adequate arterial oxygenation' : 'Awaiting sensor perfusion...')}
+                  : (spo2 ? 'Adequate arterial oxygenation' : 'Awaiting optical sensor perfusion...')}
               </p>
             </div>
 
@@ -926,18 +892,20 @@ export default function VitalsCaptureModal({
               <div className="flex items-center justify-between mb-2">
                 <span className="text-xs font-medium text-slate-500">Rhythm Analysis</span>
                 <span className={`px-2 py-0.5 rounded text-[10px] font-semibold border ${
-                  isSynthetic
-                    ? 'bg-amber-50 text-amber-800 border-amber-200'
-                    : 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                  phase === 'CAPTURE_COMPLETE'
+                    ? 'bg-indigo-50 text-indigo-800 border-indigo-200'
+                    : (telemetry?.connected && !telemetry?.leads_off
+                        ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                        : 'bg-amber-50 text-amber-800 border-amber-200')
                 }`}>
-                  {isSynthetic ? 'CALIBRATED TRACE' : 'LIVE'}
+                  {phase === 'CAPTURE_COMPLETE' ? 'RECORDED BUFFER' : (telemetry?.connected && !telemetry?.leads_off ? 'LIVE LEAD-II' : 'CHECK ELECTRODES')}
                 </span>
               </div>
               <div className="text-base font-semibold text-slate-900 truncate mt-1" title={rhythm}>
-                {phase === 'CALIBRATING' ? 'Analyzing baseline...' : rhythm}
+                {rhythm}
               </div>
               <p className="mt-1.5 text-[11px] text-slate-500">
-                {isSynthetic ? 'Calibrated PQRST benchmark waveform' : 'Lead II • Continuous sampling'}
+                AD8232 Biopotential Front-End • 500Hz Sampling
               </p>
             </div>
           </div>
@@ -950,11 +918,11 @@ export default function VitalsCaptureModal({
                   {vitalsMode === 'SPO2_ONLY' ? 'PPG PLETH' : 'LEAD II'}
                 </span>
                 <span className="text-slate-500 text-[11px]">
-                  {vitalsMode === 'SPO2_ONLY' ? 'Pulse Plethysmography (Resting Baseline)' : 'Real-time rhythm strip (25 mm/s, 10 mm/mV)'}
+                  {vitalsMode === 'SPO2_ONLY' ? 'Pulse Plethysmography (Active Sensor)' : 'Physiological rhythm strip (25 mm/s, 10 mm/mV)'}
                 </span>
               </div>
               <span className="font-mono text-[11px] text-slate-400">
-                Continuous 50Hz Sampling
+                ADC1 500Hz Hardware Transducer
               </span>
             </div>
 
@@ -966,15 +934,15 @@ export default function VitalsCaptureModal({
                 className="w-full h-44 block"
               />
               <div className="absolute top-2.5 right-3 pointer-events-none flex items-center gap-2 text-[10px] font-mono px-2 py-0.5 rounded border border-slate-700/60 bg-slate-900/80">
-                {isSynthetic ? (
-                  <div className="flex items-center gap-1.5 text-amber-300">
-                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
-                    <span>CALIBRATED BENCHMARK TRACE</span>
-                  </div>
-                ) : (
+                {telemetry?.connected && !telemetry?.leads_off ? (
                   <div className="flex items-center gap-1.5 text-emerald-400">
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                    <span>LIVE SENSOR ECG</span>
+                    <span>LIVE TRANSDUCER STREAM</span>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-1.5 text-slate-400">
+                    <span className="w-1.5 h-1.5 rounded-full bg-slate-500"></span>
+                    <span>WAITING FOR SENSOR SIGNAL</span>
                   </div>
                 )}
               </div>

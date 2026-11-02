@@ -75,6 +75,7 @@ class TelemetryModeUpdate(BaseModel):
 
 
 class SessionStartRequest(BaseModel):
+    patient_id: Optional[int] = None
     device_id: Optional[str] = "ESP32-VITALS-01"
     capture_mode: Optional[str] = "BOTH"
     sampling_rate_hz: Optional[int] = 500
@@ -387,14 +388,24 @@ def start_measurement_session(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Starts a bounded clinical acquisition session for the authenticated patient."""
-    if current_user.role != RoleEnum.patient:
-        raise HTTPException(status_code=403, detail="Only patients can initiate measurement sessions")
+    """Starts a bounded clinical acquisition session for a patient or verified physician."""
+    target_patient_id: int
+    if current_user.role == RoleEnum.patient:
+        target_patient_id = current_user.id
+    elif current_user.role in [RoleEnum.doctor, RoleEnum.admin]:
+        if data.patient_id:
+            if current_user.role == RoleEnum.doctor:
+                verify_doctor_access(data.patient_id, db, current_user)
+            target_patient_id = data.patient_id
+        else:
+            target_patient_id = current_user.id
+    else:
+        raise HTTPException(status_code=403, detail="Not authorized to initiate measurement sessions")
 
     session_id = str(uuid.uuid4())
     session = MeasurementSession(
         session_id=session_id,
-        patient_id=current_user.id,
+        patient_id=target_patient_id,
         device_id=data.device_id or "ESP32-VITALS-01",
         capture_mode=data.capture_mode or "BOTH",
         status="ACQUIRING",
@@ -429,7 +440,9 @@ def complete_measurement_session(
     if not session:
         raise HTTPException(status_code=404, detail="Measurement session not found")
 
-    if session.patient_id != current_user.id and current_user.role != RoleEnum.admin:
+    if current_user.role == RoleEnum.doctor:
+        verify_doctor_access(session.patient_id, db, current_user)
+    elif session.patient_id != current_user.id and current_user.role != RoleEnum.admin:
         raise HTTPException(status_code=403, detail="Not authorized to complete this session")
 
     completed_at = datetime.utcnow()

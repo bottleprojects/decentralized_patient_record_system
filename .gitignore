@@ -16,6 +16,9 @@ coverage/
 test.json
 *.db
 .DS_Store
+# Legal & Patent Disclosures
+*DISCLOSURE*
+*disclosure*
 # Firmware & Hardware
 # firmware/ (tracked for complete hardware implementation)
 *.ino

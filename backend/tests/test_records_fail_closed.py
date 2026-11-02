@@ -73,3 +73,15 @@ def test_record_upload_and_fail_closed_verification(client, test_users, db_sessi
     dl_missing_res = client.get(f"/records/{record_id}/download", headers=headers)
     assert dl_missing_res.status_code == 409
     assert dl_missing_res.headers["X-Integrity-Verified"] == "false"
+
+    # 7. Fail-closed: Tier-2 Provenance mismatch (H_acq altered on-chain or spoofed) -> 409 Conflict
+    monkeypatch.setattr(ipfs_service, "download", lambda c: valid_encrypted)
+    monkeypatch.setattr(blockchain_service, "get_ipfs_record", lambda c: {"sha256_hash": expected_hash})
+    monkeypatch.setattr(blockchain_service, "get_ipfs_provenance_record", lambda c: {
+        "sha256_hash": expected_hash,
+        "acquisition_hash": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+    })
+    dl_prov_mismatch = client.get(f"/records/{record_id}/download", headers=headers)
+    assert dl_prov_mismatch.status_code == 409
+    assert dl_prov_mismatch.headers["X-Integrity-Verified"] == "false"
+    assert "Tier-2 Provenance integrity check FAILED" in dl_prov_mismatch.json()["detail"]
