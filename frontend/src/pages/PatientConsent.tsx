@@ -74,7 +74,7 @@ export default function PatientConsent() {
         <div>
           <h2 className="text-2xl font-bold text-slate-800 tracking-tight">Consent Management</h2>
           <p className="text-slate-500 mt-1 font-medium text-sm">
-            Proactively manage which healthcare providers can access your secure records.
+            Proactively manage which healthcare providers can access your secure records. Access permissions are enforced by the backend application and database, while consent actions are recorded as on-chain audit events.
           </p>
         </div>
       </div>

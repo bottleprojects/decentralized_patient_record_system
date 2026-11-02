@@ -11,6 +11,7 @@ This guide provides click-by-click instructions to deploy the DPRMS full-stack a
 - **Database**: Hosted PostgreSQL on **Neon**, **Render Postgres**, or **Supabase**.
 - **File Storage**: Encrypted (AES-256-GCM) off-chain file storage via **Pinata IPFS**.
 - **Blockchain**: Smart contract (`PatientRecord.sol`) deployed on **Ethereum Sepolia Testnet** for anchoring IPFS CIDs and SHA-256 integrity hashes.
+- **Access Control & Permissions**: Strictly enforced by the backend FastAPI application and PostgreSQL database layer. The smart contract records consent-related events (`ConsentGranted`, `ConsentRevoked`) for immutable on-chain auditing, but does not enforce permissions on-chain.
 
 ---
 

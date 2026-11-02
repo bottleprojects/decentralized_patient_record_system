@@ -77,6 +77,8 @@ class ObservationCreate(BaseModel):
     unit: Optional[str] = None
 
 # --- Helper function for authorization ---
+# NOTE: Permissions are strictly enforced here in the backend application and database layer,
+# while the blockchain smart contract records immutable audit events.
 def verify_doctor_access(patient_id: int, db: Session, current_user: User):
     if current_user.role != RoleEnum.doctor:
         raise HTTPException(status_code=403, detail="Only doctors can add clinical data")

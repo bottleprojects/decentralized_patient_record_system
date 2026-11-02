@@ -104,7 +104,7 @@ export default function Register() {
                   </div>
                   <div>
                     <h3 className="font-semibold text-slate-800">For Medical Professionals</h3>
-                    <p className="text-sm text-slate-600">Securely access patient records with verified cryptographic consent.</p>
+                    <p className="text-sm text-slate-600">Access patient records with backend-enforced permissions and on-chain audited consent events.</p>
                   </div>
                 </div>
               </div>

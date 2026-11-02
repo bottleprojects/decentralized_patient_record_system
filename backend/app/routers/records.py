@@ -74,7 +74,7 @@ async def upload_record(
         action_name="medical record upload"
     )
 
-    # Permission check
+    # Permission check (Enforced by backend DB access control; smart contract only logs audit events)
     if current_user.role == RoleEnum.patient:
         if patient_id != current_user.id:
             raise HTTPException(status_code=403, detail="Patients can only upload their own records")
@@ -363,7 +363,7 @@ def download_record(record_id: int, db: Session = Depends(get_db), current_user:
             detail="This record was uploaded under legacy storage and has no IPFS CID. Please re-upload to IPFS."
         )
 
-    # 2. Permission check
+    # 2. Permission check (Enforced by backend DB access control; smart contract only logs audit events)
     if current_user.role == RoleEnum.patient:
         if record.patient_id != current_user.id:
             raise HTTPException(status_code=403, detail="Not authorized to access this record")

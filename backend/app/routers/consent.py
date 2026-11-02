@@ -6,6 +6,14 @@ from ..database import get_db
 from ..models import User, Consent, ConsentRequest, RoleEnum, AuditLog
 from ..services.auth import get_current_user
 
+"""
+Consent Management Router.
+NOTE ON ACCESS CONTROL ARCHITECTURE:
+Patient and doctor access permissions are strictly ENFORCED here by the backend API 
+and relational database access-control layer. Smart contract consent functions exist solely 
+to record immutable on-chain audit events; the smart contract does not enforce access boundaries.
+"""
+
 router = APIRouter(prefix="/consent", tags=["consent"])
 
 @router.post("/grant/{doctor_id}")

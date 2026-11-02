@@ -464,6 +464,9 @@ export default function PatientDashboard() {
               <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
                 <Shield className="w-5 h-5 text-slate-400" /> Active Access
               </h3>
+              <p className="text-xs text-slate-500 mt-1">
+                Access permissions are enforced by the backend database; consent events are recorded on-chain for auditing.
+              </p>
             </div>
             <div className="p-5">
               {consents.length === 0 ? (
