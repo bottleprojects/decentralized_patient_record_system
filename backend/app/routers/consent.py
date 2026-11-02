@@ -199,45 +199,85 @@ def reject_request(request_id: int, db: Session = Depends(get_db), current_user:
     db.commit()
     return {"message": "Consent request rejected"}
 
+from datetime import datetime, timedelta
+from typing import Optional
 from pydantic import BaseModel
 
 class EmergencyAccessRequest(BaseModel):
     patient_id: int
     justification: str
 
+
+def check_active_consent(patient_id: int, doctor_id: int, db: Session) -> Optional[Consent]:
+    """
+    Verifies active consent between patient and doctor, enforcing expiration
+    deadlines on emergency break-glass authorizations.
+    """
+    consent = db.query(Consent).filter(
+        Consent.patient_id == patient_id,
+        Consent.doctor_id == doctor_id,
+        Consent.status == "active",
+    ).first()
+    if not consent:
+        return None
+    if consent.expires_at and consent.expires_at < datetime.utcnow():
+        consent.status = "expired"
+        db.commit()
+        return None
+    return consent
+
+
 @router.post("/emergency")
 def request_emergency_access(data: EmergencyAccessRequest, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """
+    Emergency 'Break-Glass' clinical access protocol.
+    Enforces verified-physician credentials, clinical justification requirement,
+    a strictly time-bounded 24-hour access lease, and an immutable audit trail.
+    """
     if current_user.role != RoleEnum.doctor:
         raise HTTPException(status_code=403, detail="Only doctors can request emergency access")
         
     if current_user.verification_status != "verified":
-        raise HTTPException(status_code=403, detail="Doctor account must be verified")
+        raise HTTPException(status_code=403, detail="Doctor account must be verified by an administrator to invoke emergency access")
+
+    if not data.justification or len(data.justification.strip()) < 15:
+        raise HTTPException(
+            status_code=400,
+            detail="Emergency break-glass access requires a substantive clinical justification (minimum 15 characters)."
+        )
 
     patient = db.query(User).filter(User.id == data.patient_id, User.role == RoleEnum.patient).first()
     if not patient:
         raise HTTPException(status_code=404, detail="Patient not found")
         
-    # Check if consent already exists
-    existing_consent = db.query(Consent).filter(
-        Consent.patient_id == data.patient_id,
-        Consent.doctor_id == current_user.id,
-        Consent.status == "active"
-    ).first()
-    
-    if existing_consent:
+    now = datetime.utcnow()
+    # Check if active unexpired consent already exists
+    existing = check_active_consent(data.patient_id, current_user.id, db)
+    if existing:
         return {"message": "You already have active consent for this patient"}
         
-    # Create emergency consent
-    consent = Consent(patient_id=data.patient_id, doctor_id=current_user.id)
+    # Create time-bounded emergency consent (24-hour maximum authorization window)
+    expires_at = now + timedelta(hours=24)
+    consent = Consent(
+        patient_id=data.patient_id,
+        doctor_id=current_user.id,
+        status="active",
+        granted_at=now,
+        expires_at=expires_at,
+    )
     db.add(consent)
     
     # High-priority audit log
     audit = AuditLog(
         user_id=current_user.id, 
-        action=f"EMERGENCY_ACCESS_GRANTED - Justification: {data.justification}", 
-        resource_id=str(data.patient_id)
+        action="EMERGENCY_BREAKGLASS_ACCESS", 
+        resource_id=f"patient:{data.patient_id};expires:{expires_at.isoformat()}Z;justification:{data.justification.strip()}"
     )
     db.add(audit)
     db.commit()
     
-    return {"message": "Emergency access granted. This action has been logged and the patient will be notified."}
+    return {
+        "message": "Emergency access granted. Bounded authorization active for 24 hours.",
+        "expires_at": expires_at.isoformat() + "Z",
+        "patient_id": data.patient_id,
+    }

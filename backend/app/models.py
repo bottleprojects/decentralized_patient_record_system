@@ -119,9 +119,10 @@ class Consent(Base):
     id = Column(Integer, primary_key=True, index=True)
     patient_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     doctor_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    status = Column(String, default="active") # active, revoked
+    status = Column(String, default="active") # active, revoked, expired
     granted_at = Column(DateTime, default=datetime.utcnow)
     revoked_at = Column(DateTime, nullable=True)
+    expires_at = Column(DateTime, nullable=True) # Expiration for time-bounded emergency access
 
 class AuditLog(Base):
     __tablename__ = "audit_logs"

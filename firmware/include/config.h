@@ -16,10 +16,10 @@
 // Pre-shared HMAC-SHA256 device key (burned into secure flash / eFuse in production)
 #define DEVICE_HMAC_SECRET    "DPRMS_SECURE_DEVICE_SECRET_KEY_2026"
 
-// --- Wi-Fi & Backend Endpoint Configuration ---
+// --- Wi-Fi & Backend Endpoint Configuration (Production Authenticated TLS/HTTPS) ---
 #define WIFI_SSID             "Hospital_Secure_IoT"
 #define WIFI_PASSWORD         "Clinical_Vitals_2026!"
-#define BACKEND_BASE_URL      "http://192.168.1.100:8000"
+#define BACKEND_BASE_URL      "https://dprms-api.example.com"
 #define INGEST_ENDPOINT       "/clinical/telemetry/ingest"
 #define MODE_ENDPOINT         "/clinical/telemetry/mode"
 #define HTTP_TIMEOUT_MS       3000

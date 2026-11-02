@@ -8,7 +8,7 @@ import time
 import concurrent.futures
 
 from ..database import get_db
-from ..models import User, MedicalRecord, Consent, RoleEnum, AuditLog
+from ..models import User, MedicalRecord, Consent, RoleEnum, AuditLog, MeasurementSession
 from ..services.auth import get_current_user
 from ..services.crypto import crypto_service
 from ..services.blockchain import blockchain_service
@@ -149,6 +149,54 @@ async def upload_record(
     # AES-256-GCM encrypt BEFORE uploading to IPFS (IPFS is public)
     encrypted_bytes = crypto_service.encrypt(file_bytes)
 
+    # Server-side validation of hardware provenance metadata
+    verified_acquisition_hash = None
+    verified_session_id = None
+    verified_device_id = device_id
+    verified_acquisition_source = acquisition_source or "LIVE_HARDWARE"
+
+    if acquisition_hash or session_id:
+        if not session_id or not acquisition_hash:
+            raise HTTPException(
+                status_code=400,
+                detail="Incomplete provenance metadata: Both session_id and acquisition_hash must be supplied together."
+            )
+        session = db.query(MeasurementSession).filter(MeasurementSession.session_id == session_id).first()
+        if not session:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Measurement session '{session_id}' not found. Cannot anchor unverified provenance metadata."
+            )
+        if session.patient_id != patient_id:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Provenance validation failed: Session '{session_id}' belongs to patient {session.patient_id}, not {patient_id}."
+            )
+        if session.status != "CAPTURE_COMPLETE":
+            raise HTTPException(
+                status_code=400,
+                detail=f"Provenance validation failed: Session status is '{session.status}'. Only 'CAPTURE_COMPLETE' sessions can be anchored."
+            )
+        if session.quality_status != "VALID":
+            raise HTTPException(
+                status_code=400,
+                detail=f"Provenance validation failed: Session quality status is '{session.quality_status}'. Must be 'VALID'."
+            )
+        if session.raw_manifest_hash != acquisition_hash:
+            raise HTTPException(
+                status_code=400,
+                detail="Provenance validation failed: Supplied acquisition_hash does not match the canonical acquisition manifest hash recorded for this session."
+            )
+        if device_id and session.device_id and device_id != session.device_id:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Provenance validation failed: Supplied device_id '{device_id}' does not match session device '{session.device_id}'."
+            )
+        verified_acquisition_hash = session.raw_manifest_hash
+        verified_session_id = session.session_id
+        verified_device_id = session.device_id
+        verified_acquisition_source = session.acquisition_source or "LIVE_HARDWARE"
+
     # B0.3 — Non-identifying IPFS filename (Part 9.1: zero PII or original names in public IPFS metadata)
     original_filename = file.filename or "medical_file"
     ipfs_filename = f"enc_{uuid.uuid4().hex}.bin"
@@ -163,10 +211,10 @@ async def upload_record(
         ipfs_file_name=original_filename,   # real filename in DB only
         ipfs_file_size=len(file_bytes),
         record_hash=original_hash,
-        acquisition_hash=acquisition_hash,
-        session_id=session_id,
-        device_id=device_id,
-        acquisition_source=acquisition_source or "LIVE_HARDWARE",
+        acquisition_hash=verified_acquisition_hash,
+        session_id=verified_session_id,
+        device_id=verified_device_id,
+        acquisition_source=verified_acquisition_source,
         blockchain_tx_hash=None,
         blockchain_status="pending_upload",
         description=description,
@@ -189,12 +237,12 @@ async def upload_record(
     # 3. Broadcast Sepolia tx with hardware acquisition provenance if present
     tx_hash = None
     try:
-        if acquisition_hash:
+        if verified_acquisition_hash:
             tx_hash = blockchain_service.store_ipfs_record_with_provenance(
                 cid,
                 cid,
                 original_hash,
-                acquisition_hash,
+                verified_acquisition_hash,
                 _ONCHAIN_FILE_NAME_LABEL,   # B0.3: generic label, not the real filename
                 file_type,                  # category tag (no PII) kept on-chain
                 len(file_bytes),            # original size (no PII) kept on-chain
@@ -237,10 +285,28 @@ async def upload_record(
 
 @router.get("/{record_id}/status")
 def get_record_status(record_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    """Status check endpoint for polling confirmation state."""
+    """Status check endpoint for polling confirmation state with strict authorization."""
     record = db.query(MedicalRecord).filter(MedicalRecord.id == record_id).first()
     if not record:
         raise HTTPException(status_code=404, detail="Record not found")
+
+    # Authorization gating
+    if current_user.role == RoleEnum.patient:
+        if record.patient_id != current_user.id:
+            raise HTTPException(status_code=403, detail="Not authorized to inspect this record's status")
+    elif current_user.role == RoleEnum.doctor:
+        if current_user.verification_status != "verified":
+            raise HTTPException(status_code=403, detail="Doctor account must be verified by an administrator")
+        consent = db.query(Consent).filter(
+            Consent.patient_id == record.patient_id,
+            Consent.doctor_id == current_user.id,
+            Consent.status == "active",
+        ).first()
+        if not consent:
+            raise HTTPException(status_code=403, detail="No active consent to view this record's status")
+    elif current_user.role != RoleEnum.admin:
+        raise HTTPException(status_code=403, detail="Not authorized")
+
     if record.blockchain_status == "confirming" and record.blockchain_tx_hash:
         try:
             receipt = blockchain_service.w3.eth.get_transaction_receipt(record.blockchain_tx_hash)
@@ -274,6 +340,8 @@ def retry_blockchain_anchor(
     if current_user.role == RoleEnum.patient and record.patient_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized to retry anchoring for this record")
     elif current_user.role == RoleEnum.doctor:
+        if current_user.verification_status != "verified":
+            raise HTTPException(status_code=403, detail="Doctor account must be verified by an administrator")
         consent = db.query(Consent).filter(
             Consent.patient_id == record.patient_id,
             Consent.doctor_id == current_user.id,
@@ -386,6 +454,8 @@ def get_records(db: Session = Depends(get_db), current_user: User = Depends(get_
         } for r in records]
     
     elif current_user.role == RoleEnum.doctor:
+        if current_user.verification_status != "verified":
+            raise HTTPException(status_code=403, detail="Doctor account must be verified by an administrator before retrieving patient records")
         # Doctor can see records of patients they have active consent for
         consents = db.query(Consent).filter(Consent.doctor_id == current_user.id, Consent.status == "active").all()
         patient_ids = [c.patient_id for c in consents]
@@ -486,6 +556,8 @@ def download_record(record_id: int, db: Session = Depends(get_db), current_user:
         if record.patient_id != current_user.id:
             raise HTTPException(status_code=403, detail="Not authorized to access this record")
     elif current_user.role == RoleEnum.doctor:
+        if current_user.verification_status != "verified":
+            raise HTTPException(status_code=403, detail="Doctor account must be verified by an administrator before downloading patient records")
         consent = db.query(Consent).filter(
             Consent.patient_id == record.patient_id,
             Consent.doctor_id == current_user.id,

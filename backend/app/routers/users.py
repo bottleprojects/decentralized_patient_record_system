@@ -32,8 +32,16 @@ def register(user: UserCreate, request: Request, db: Session = Depends(get_db)):
     if db_user:
         raise HTTPException(status_code=400, detail="Email already registered")
     
+    if user.role == RoleEnum.admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Public administrator registration is prohibited. Administrator accounts must be provisioned internally."
+        )
+
     if user.role == RoleEnum.doctor and not user.license_number:
         raise HTTPException(status_code=400, detail="License number is required for doctors")
+
+    verification_status = "pending" if user.role == RoleEnum.doctor else "verified"
 
     import random
     
@@ -51,7 +59,8 @@ def register(user: UserCreate, request: Request, db: Session = Depends(get_db)):
         hashed_password=hashed_password,
         full_name=user.full_name,
         role=user.role,
-        license_number=user.license_number
+        license_number=user.license_number,
+        verification_status=verification_status,
     )
     db.add(new_user)
     db.commit()
@@ -110,6 +119,8 @@ def get_current_user_profile(current_user: User = Depends(get_current_user)):
 def get_patients(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     if current_user.role != RoleEnum.doctor:
         raise HTTPException(status_code=403, detail="Only doctors can search for patients.")
+    if current_user.verification_status != "verified":
+        raise HTTPException(status_code=403, detail="Doctor account must be verified by an administrator before accessing patient directory.")
     
     from ..models import Consent, ConsentRequest
     patients = db.query(User).filter(User.role == RoleEnum.patient).all()
@@ -128,7 +139,7 @@ def get_doctors(db: Session = Depends(get_db), current_user: User = Depends(get_
     if current_user.role != RoleEnum.patient:
         raise HTTPException(status_code=403, detail="Only patients can search for doctors.")
     
-    doctors = db.query(User).filter(User.role == RoleEnum.doctor).all()
+    doctors = db.query(User).filter(User.role == RoleEnum.doctor, User.verification_status == "verified").all()
     return [{"id": d.id, "email": d.email, "full_name": d.full_name, "license_number": d.license_number} for d in doctors]
 
 @router.get("")

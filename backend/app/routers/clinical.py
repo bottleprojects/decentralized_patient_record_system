@@ -77,7 +77,7 @@ class TelemetryModeUpdate(BaseModel):
 
 class SessionStartRequest(BaseModel):
     patient_id: Optional[int] = None
-    device_id: Optional[str] = "ESP32-VITALS-01"
+    device_id: Optional[str] = None
     capture_mode: Optional[str] = "BOTH"
     sampling_rate_hz: Optional[int] = 500
 
@@ -121,15 +121,8 @@ def verify_doctor_access(patient_id: int, db: Session, current_user: User):
     if current_user.verification_status != "verified":
         raise HTTPException(status_code=403, detail="Doctor account must be verified by an administrator")
 
-    consent = (
-        db.query(Consent)
-        .filter(
-            Consent.patient_id == patient_id,
-            Consent.doctor_id == current_user.id,
-            Consent.status == "active",
-        )
-        .first()
-    )
+    from .consent import check_active_consent
+    consent = check_active_consent(patient_id, current_user.id, db)
     if not consent:
         raise HTTPException(status_code=403, detail="No active consent from this patient")
 
@@ -184,7 +177,10 @@ def assign_device_to_patient(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Assigns or reassigns an authorized device to a patient."""
+    """
+    Assigns an authorized device to a patient with strict reassignment protection.
+    Prevents unauthorized device takeover between patients.
+    """
     if current_user.role not in [RoleEnum.admin, RoleEnum.patient]:
         raise HTTPException(status_code=403, detail="Not authorized to assign devices")
 
@@ -192,10 +188,28 @@ def assign_device_to_patient(
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
 
-    if current_user.role == RoleEnum.patient and data.patient_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Patients can only assign devices to themselves")
+    if device.device_status != "active":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Device '{device.device_id}' is not active (status: {device.device_status}). Cannot assign an inactive or revoked device."
+        )
+
+    target_patient = db.query(User).filter(User.id == data.patient_id, User.role == RoleEnum.patient).first()
+    if not target_patient:
+        raise HTTPException(status_code=404, detail="Target patient not found")
+
+    if current_user.role == RoleEnum.patient:
+        if data.patient_id != current_user.id:
+            raise HTTPException(status_code=403, detail="Patients can only assign devices to themselves")
+        # Prevent hijacking another patient's device
+        if device.patient_id is not None and device.patient_id != current_user.id:
+            raise HTTPException(
+                status_code=403,
+                detail="Unauthorized device reassignment: This device is currently registered to another patient. Inter-patient device transfer requires administrative approval."
+            )
 
     device.patient_id = data.patient_id
+    db.add(AuditLog(user_id=current_user.id, action="ASSIGN_DEVICE", resource_id=f"{device.device_id}:{data.patient_id}"))
     db.commit()
     return {"message": "Device assigned successfully", "device_id": device.device_id, "patient_id": data.patient_id}
 
@@ -465,18 +479,36 @@ def start_measurement_session(
                 verify_doctor_access(data.patient_id, db, current_user)
             target_patient_id = data.patient_id
         else:
+            if current_user.role == RoleEnum.doctor:
+                raise HTTPException(status_code=400, detail="Doctors must supply a target patient_id to initiate a measurement session")
             target_patient_id = current_user.id
     else:
         raise HTTPException(status_code=403, detail="Not authorized to initiate measurement sessions")
 
-    target_device_id = data.device_id
-    if not target_device_id:
+    target_device_id = data.device_id.strip() if data.device_id else None
+    if target_device_id:
+        dev = db.query(Device).filter(Device.device_id == target_device_id).first()
+        if not dev:
+            raise HTTPException(status_code=404, detail=f"Device '{target_device_id}' not found")
+        if dev.device_status != "active":
+            raise HTTPException(status_code=400, detail=f"Device '{target_device_id}' is not active (status: {dev.device_status})")
+        if dev.patient_id != target_patient_id:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Device ownership validation failed: Device '{target_device_id}' is not registered to patient {target_patient_id}."
+            )
+    else:
         assigned_device = (
             db.query(Device)
             .filter(Device.patient_id == target_patient_id, Device.device_status == "active")
             .first()
         )
-        target_device_id = assigned_device.device_id if assigned_device else "UNKNOWN_DEVICE"
+        if not assigned_device:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Patient {target_patient_id} has no active biomedical device registered. Device registration required before starting session."
+            )
+        target_device_id = assigned_device.device_id
 
     session_id = str(uuid.uuid4())
     session = MeasurementSession(

@@ -32,6 +32,7 @@ with engine.connect() as conn:
             "ALTER TABLE medical_records ADD COLUMN IF NOT EXISTS acquisition_source VARCHAR DEFAULT 'LIVE_HARDWARE'",
             "ALTER TABLE medical_records ALTER COLUMN supabase_file_path DROP NOT NULL",
             "ALTER TABLE medical_records ALTER COLUMN record_hash DROP NOT NULL",
+            "ALTER TABLE consents ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP",
         ]
         for stmt in pg_migrations:
             try:
@@ -54,6 +55,7 @@ with engine.connect() as conn:
             "ALTER TABLE medical_records ADD COLUMN session_id VARCHAR",
             "ALTER TABLE medical_records ADD COLUMN device_id VARCHAR",
             "ALTER TABLE medical_records ADD COLUMN acquisition_source VARCHAR DEFAULT 'LIVE_HARDWARE'",
+            "ALTER TABLE consents ADD COLUMN expires_at DATETIME",
         ]
         for stmt in sqlite_migrations:
             try:
@@ -204,6 +206,8 @@ else:
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
+    # Log full stack trace server-side only for diagnostics without leaking to clients
+    print(f"ERROR [Server Exception] {request.method} {request.url.path}: {exc}\n{traceback.format_exc()}")
     origin = request.headers.get("origin")
     headers = {}
     if origin:
@@ -211,7 +215,7 @@ async def global_exception_handler(request: Request, exc: Exception):
         headers["Access-Control-Allow-Credentials"] = "true"
     return JSONResponse(
         status_code=500,
-        content={"message": "Internal Server Error", "detail": str(exc), "traceback": traceback.format_exc()},
+        content={"message": "Internal Server Error", "detail": "An internal server error occurred. Please contact system support."},
         headers=headers
     )
 

@@ -6,6 +6,7 @@ from sqlalchemy import func
 
 from ..database import get_db
 from ..models import MedicalRecord, User, Consent, RoleEnum
+from ..services.auth import get_current_user
 
 router = APIRouter(tags=["metrics"])
 
@@ -25,10 +26,13 @@ def _format_bytes(num_bytes: int) -> str:
 @router.get("/api/metrics")
 @router.get("/stats")
 @router.get("/api/stats")
-def get_system_metrics(db: Session = Depends(get_db)):
+def get_system_metrics(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """
-    Returns live system counters, storage statistics,
-    hybrid blockchain vs naive comparison data, and recent upload audit trails.
+    Returns authentic system counters, storage statistics, and role-scoped record metadata.
+    Enforces authentication and eliminates fabricated integrity rates or unverified latency claims.
     """
     # 1. Total records
     total_records = db.query(MedicalRecord).count()
@@ -36,18 +40,27 @@ def get_system_metrics(db: Session = Depends(get_db)):
     # 2. Total IPFS storage bytes
     total_bytes = db.query(func.coalesce(func.sum(MedicalRecord.ipfs_file_size), 0)).scalar() or 0
 
-    # 3. Confirmed records and integrity rate
+    # 3. Confirmed records and actual integrity pass rate
     confirmed_records = db.query(MedicalRecord).filter(
         MedicalRecord.blockchain_status == "confirmed"
     ).count()
+    actual_integrity_pass_rate = round((confirmed_records / total_records * 100.0), 2) if total_records > 0 else 0.0
 
     # 4. User and consent counts
     total_patients = db.query(User).filter(User.role == RoleEnum.patient).count()
     total_doctors = db.query(User).filter(User.role == RoleEnum.doctor).count()
     active_consents = db.query(Consent).filter(Consent.status == "active").count()
 
-    # 5. Last 5 recent uploaded records
-    recent_records_raw = db.query(MedicalRecord).order_by(MedicalRecord.id.desc()).limit(5).all()
+    # 5. Role-scoped recent uploaded records (Privacy protection: never leak other patients' CIDs or metadata)
+    if current_user.role == RoleEnum.admin:
+        recent_records_raw = db.query(MedicalRecord).order_by(MedicalRecord.id.desc()).limit(5).all()
+    elif current_user.role == RoleEnum.doctor:
+        consents = db.query(Consent).filter(Consent.doctor_id == current_user.id, Consent.status == "active").all()
+        patient_ids = [c.patient_id for c in consents]
+        recent_records_raw = db.query(MedicalRecord).filter(MedicalRecord.patient_id.in_(patient_ids)).order_by(MedicalRecord.id.desc()).limit(5).all()
+    else:
+        recent_records_raw = db.query(MedicalRecord).filter(MedicalRecord.patient_id == current_user.id).order_by(MedicalRecord.id.desc()).limit(5).all()
+
     gateway_url = os.getenv("PINATA_GATEWAY", "https://gateway.pinata.cloud").rstrip("/")
 
     recent_uploads = []
@@ -63,7 +76,7 @@ def get_system_metrics(db: Session = Depends(get_db)):
             "record_hash": r.record_hash,
             "blockchain_tx_hash": r.blockchain_tx_hash,
             "blockchain_status": r.blockchain_status or "confirmed",
-            "integrity_verified": True,
+            "integrity_verified": r.blockchain_status == "confirmed",
             "created_at": r.created_at.isoformat() if r.created_at else datetime.utcnow().isoformat(),
         })
 
@@ -72,7 +85,8 @@ def get_system_metrics(db: Session = Depends(get_db)):
             "total_records": total_records,
             "total_ipfs_storage_bytes": total_bytes,
             "total_ipfs_storage_formatted": _format_bytes(total_bytes),
-            "integrity_pass_rate": 100.0,
+            "integrity_pass_rate": actual_integrity_pass_rate,
+            "confirmed_records": confirmed_records,
             "encryption_standard": "AES-256-GCM",
             "total_patients": total_patients,
             "total_doctors": total_doctors,
@@ -101,28 +115,6 @@ def get_system_metrics(db: Session = Depends(get_db)):
                     "note": "Constant O(1) gas cost independent of original file size.",
                 },
             },
-            "pipeline_latency": [
-                {
-                    "stage": "AES-256-GCM Encryption",
-                    "avg_ms": 42,
-                    "description": "Client & container symmetric cipher with authenticated tags",
-                },
-                {
-                    "stage": "Pinata IPFS Pinning",
-                    "avg_ms": 315,
-                    "description": "Off-chain distributed content-addressed storage propagation",
-                },
-                {
-                    "stage": "Blockchain Hash Anchoring",
-                    "avg_ms": 1150,
-                    "description": "Smart contract immutable state write & Sepolia block broadcast",
-                },
-                {
-                    "stage": "SHA-256 Integrity Verification",
-                    "avg_ms": 16,
-                    "description": "On-demand tamper-evidence check comparing decrypted bytes to on-chain hash",
-                },
-            ],
         },
         "recent_uploads": recent_uploads,
     }

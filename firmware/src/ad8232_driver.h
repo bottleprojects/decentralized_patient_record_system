@@ -4,6 +4,8 @@
 #include <vector>
 #include "../include/config.h"
 
+#define ECG_RING_BUFFER_SIZE 128
+
 struct Ad8232Data {
     bool isConnected;
     bool leadsOff;
@@ -29,8 +31,12 @@ private:
     uint8_t _loPlusPin;
     uint8_t _loMinusPin;
     uint8_t _sdnPin;
-    bool _isInitialized;
-    int _latestSample;
-    std::vector<int> _samples;
+    volatile bool _isInitialized;
+    volatile int _latestSample;
+
+    // Statically allocated, ISR-safe ring buffer: eliminates heap allocations in ISR
+    volatile int _sampleRingBuffer[ECG_RING_BUFFER_SIZE];
+    volatile size_t _head;
+    volatile size_t _count;
 };
 

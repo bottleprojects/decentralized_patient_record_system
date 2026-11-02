@@ -28,15 +28,8 @@ def verify_fhir_access(patient_id: int, db: Session, current_user: User):
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Not authorized: Physician account must be verified by an administrator"
             )
-        consent = (
-            db.query(Consent)
-            .filter(
-                Consent.patient_id == patient_id,
-                Consent.doctor_id == current_user.id,
-                Consent.status == "active",
-            )
-            .first()
-        )
+        from .consent import check_active_consent
+        consent = check_active_consent(patient_id, current_user.id, db)
         if not consent:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,

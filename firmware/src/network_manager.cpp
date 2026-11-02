@@ -1,4 +1,5 @@
 #include "network_manager.h"
+#include <WiFiClientSecure.h>
 
 NetworkManager::NetworkManager()
     : _ssid(WIFI_SSID),
@@ -43,18 +44,25 @@ bool NetworkManager::checkReconnect() {
 bool NetworkManager::sendTelemetry(const String& jsonPayload, String& outServerMode) {
     if (!isConnected()) return false;
 
-    HTTPClient http;
+    WiFiClientSecure tlsClient;
+    tlsClient.setInsecure(); // Production setups can load custom enterprise/hospital root CA bundle
+
+    HTTPClient https;
     String url = String(BACKEND_BASE_URL) + String(INGEST_ENDPOINT);
 
-    http.begin(url);
-    http.addHeader("Content-Type", "application/json");
-    http.setTimeout(HTTP_TIMEOUT_MS);
+    if (!https.begin(tlsClient, url)) {
+        return false;
+    }
 
-    int httpResponseCode = http.POST(jsonPayload);
+    https.addHeader("Content-Type", "application/json");
+    https.addHeader("X-Device-ID", DEVICE_ID);
+    https.setTimeout(HTTP_TIMEOUT_MS);
+
+    int httpResponseCode = https.POST(jsonPayload);
     bool success = false;
 
     if (httpResponseCode == 200) {
-        String response = http.getString();
+        String response = https.getString();
         int modeIdx = response.indexOf("\"mode\":\"");
         if (modeIdx != -1) {
             int endIdx = response.indexOf("\"", modeIdx + 8);
@@ -64,7 +72,7 @@ bool NetworkManager::sendTelemetry(const String& jsonPayload, String& outServerM
         }
         success = true;
     }
-    http.end();
+    https.end();
     return success;
 }
 

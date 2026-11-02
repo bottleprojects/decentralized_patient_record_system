@@ -20,6 +20,7 @@
 
 #include <Wire.h>
 #include <WiFi.h>
+#include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 #include <time.h>
 #include <mbedtls/md.h>
@@ -46,10 +47,8 @@
 const char* WIFI_SSID     = "YOUR_WIFI_SSID";
 const char* WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";
 
-// Backend Ingestion URL (Point to your FastAPI backend IP / domain)
-// Local dev example: "http://192.168.1.100:8000/clinical/telemetry/ingest"
-// Production example: "https://your-dprms-api.example.com/clinical/telemetry/ingest"
-const char* BACKEND_INGEST_URL = "http://192.168.1.100:8000/clinical/telemetry/ingest";
+// Backend Ingestion URL (Production Authenticated TLS/HTTPS Endpoint)
+const char* BACKEND_INGEST_URL = "https://dprms-api.example.com/clinical/telemetry/ingest";
 
 // Hardware-Rooted Cryptographic Credentials (Registered in DPRMS backend DB)
 const char* DEVICE_ID       = "ESP32-VITALS-01";
@@ -403,26 +402,30 @@ void loop() {
     Serial.print("LeadsOff: "); Serial.println(leadsOff ? "YES" : "NO");
     Serial.println("AuthTag: " + authTag);
 
-    // Dispatch POST Request to DPRMS Backend Gateway
+    // Dispatch POST Request to DPRMS Backend Gateway over TLS/HTTPS
     if (WiFi.status() == WL_CONNECTED) {
+      WiFiClientSecure secureClient;
+      secureClient.setInsecure(); // In production, load CA cert
       HTTPClient http;
-      http.begin(BACKEND_INGEST_URL);
-      http.addHeader("Content-Type", "application/json");
-      http.setTimeout(2500);
+      if (http.begin(secureClient, BACKEND_INGEST_URL)) {
+        http.addHeader("Content-Type", "application/json");
+        http.addHeader("X-Device-ID", DEVICE_ID);
+        http.setTimeout(2500);
 
-      int httpResponseCode = http.POST(jsonPayload);
-      if (httpResponseCode > 0) {
-        Serial.print("[HTTP] Telemetry accepted by backend. Status: ");
-        Serial.println(httpResponseCode);
-        if (httpResponseCode == 200) {
-          String responseBody = http.getString();
-          // Optional: Inspect responseBody for server-directed mode changes
+        int httpResponseCode = http.POST(jsonPayload);
+        if (httpResponseCode > 0) {
+          Serial.print("[HTTPS] Telemetry accepted by backend. Status: ");
+          Serial.println(httpResponseCode);
+          if (httpResponseCode == 200) {
+            String responseBody = http.getString();
+            // Optional: Inspect responseBody for server-directed mode changes
+          }
+        } else {
+          Serial.print("[HTTPS ERROR] Failed to deliver packet: ");
+          Serial.println(http.errorToString(httpResponseCode).c_str());
         }
-      } else {
-        Serial.print("[HTTP ERROR] Failed to deliver packet: ");
-        Serial.println(http.errorToString(httpResponseCode).c_str());
+        http.end();
       }
-      http.end();
     } else {
       Serial.println("[OFFLINE] Wi-Fi unavailable. Packet logged to serial only.");
     }

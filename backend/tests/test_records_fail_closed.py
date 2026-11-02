@@ -14,6 +14,18 @@ def test_record_upload_and_fail_closed_verification(client, test_users, db_sessi
     # Mock IPFS upload
     monkeypatch.setattr(ipfs_service, "upload", lambda b, fn: "QmTestUploadCID1234567890")
 
+    from backend.app.models import MeasurementSession
+    sess = MeasurementSession(
+        session_id="SESS-PROVENANCE-01",
+        patient_id=test_users["patient_a"].id,
+        device_id="ESP32-PATIENT-A",
+        status="CAPTURE_COMPLETE",
+        quality_status="VALID",
+        raw_manifest_hash="b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9",
+    )
+    db_session.add(sess)
+    db_session.commit()
+
     # 1. Upload record
     files = {"file": ("report.pdf", io.BytesIO(file_content), "application/pdf")}
     data = {
@@ -22,6 +34,7 @@ def test_record_upload_and_fail_closed_verification(client, test_users, db_sessi
         "description": "Lead-II ECG Report",
         "acquisition_source": "LIVE_HARDWARE",
         "device_id": "ESP32-PATIENT-A",
+        "session_id": "SESS-PROVENANCE-01",
         "acquisition_hash": "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
     }
 
