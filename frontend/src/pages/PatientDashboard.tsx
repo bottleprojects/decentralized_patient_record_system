@@ -45,7 +45,7 @@ export default function PatientDashboard() {
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [downloadingRecordId, setDownloadingRecordId] = useState<number | null>(null);
   const [integrityResults, setIntegrityResults] = useState<{ [key: number]: boolean | null }>({});
-  // B0.2: per-record error messages from tamper/integrity failures
+  // Per-record error messages from tamper/integrity failures
   const [downloadErrors, setDownloadErrors] = useState<{ [key: number]: string | null }>({});
   const [user, setUser] = useState<any>(null);
   const [isVitalsModalOpen, setIsVitalsModalOpen] = useState(false);
@@ -175,7 +175,7 @@ export default function PatientDashboard() {
         headers: { 'Authorization': `Bearer ${token}` },
       });
 
-      // B0.2: 409 = hash mismatch (file altered), 422 = ciphertext corrupted — both are tamper signals
+      // 409 = hash mismatch (file altered), 422 = ciphertext corrupted — both are tamper signals
       if (response.status === 409 || response.status === 422) {
         const errorData = await response.json().catch(() => ({}));
         setIntegrityResults(prev => ({ ...prev, [record.id]: false }));
@@ -409,7 +409,7 @@ export default function PatientDashboard() {
                           Download
                         </button>
                       </div>
-                      {/* B0.2: Show clear red error message for tamper/integrity failures */}
+                      {/* Show clear red error message for tamper/integrity failures */}
                       {downloadErrors[record.id] && (
                         <div className="mt-2 p-3 bg-red-50 border border-red-200 rounded-lg flex items-start gap-2">
                           <ShieldAlert className="w-4 h-4 text-red-600 flex-shrink-0 mt-0.5" />

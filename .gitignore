@@ -16,9 +16,7 @@ coverage/
 test.json
 *.db
 .DS_Store
-# Legal & Patent Disclosures
-*DISCLOSURE*
-*disclosure*
+# Documentation & Local Drafts
 docs/
 # Firmware & Hardware
 # firmware/ (tracked for complete hardware implementation)

@@ -33,7 +33,7 @@ describe("PatientRecord Smart Contract Security & Provenance", function () {
     expect(record.fileSize).to.equal(2048);
   });
 
-  it("Should REJECT unauthorized accounts attempting to store records (Part 10.1)", async function () {
+  it("Should REJECT unauthorized accounts attempting to store records", async function () {
     await expect(
       contract.connect(unauthorizedUser).storeIPFSRecord(
         "REC-UNAUTH-01",
@@ -46,7 +46,7 @@ describe("PatientRecord Smart Contract Security & Provenance", function () {
     ).to.be.revertedWithCustomError(contract, "UnauthorizedCaller");
   });
 
-  it("Should REJECT duplicate record IDs to prevent overwrite attacks (Part 10.2)", async function () {
+  it("Should REJECT duplicate record IDs to prevent overwrite attacks", async function () {
     await contract.storeIPFSRecord(
       "REC-UNIQUE-01",
       "QmOriginalCID",
@@ -68,7 +68,7 @@ describe("PatientRecord Smart Contract Security & Provenance", function () {
     ).to.be.revertedWithCustomError(contract, "RecordAlreadyExists");
   });
 
-  it("Should REJECT empty record IDs or CIDs (Part 10.3)", async function () {
+  it("Should REJECT empty record IDs or CIDs", async function () {
     await expect(
       contract.storeIPFSRecord("", "QmCID", "hash", "file", "type", 100)
     ).to.be.revertedWithCustomError(contract, "EmptyRecordIdentifier");
@@ -78,7 +78,7 @@ describe("PatientRecord Smart Contract Security & Provenance", function () {
     ).to.be.revertedWithCustomError(contract, "EmptyContentIdentifier");
   });
 
-  it("Should store and retrieve full hardware provenance records (Part 7)", async function () {
+  it("Should store and retrieve full hardware provenance records", async function () {
     const acquisitionHash = "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9";
     const fileHash = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
 
@@ -100,7 +100,7 @@ describe("PatientRecord Smart Contract Security & Provenance", function () {
     expect(prov.version).to.equal(1);
   });
 
-  it("Should respect emergency pause (Part 10.5)", async function () {
+  it("Should respect emergency pause", async function () {
     await contract.pause();
 
     await expect(
@@ -128,7 +128,7 @@ describe("PatientRecord Smart Contract Security & Provenance", function () {
     ).to.not.be.reverted;
   });
 
-  it("Should emit immutable consent audit events (Part 10.4)", async function () {
+  it("Should emit immutable consent audit events", async function () {
     await expect(contract.connect(owner).grantConsent(doctor.address, "REC-CONSENT-01"))
       .to.emit(contract, "ConsentGranted")
       .withArgs(owner.address, doctor.address, "REC-CONSENT-01");

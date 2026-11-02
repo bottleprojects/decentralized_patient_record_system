@@ -22,7 +22,7 @@ IPFS_MAX_SIZE_BYTES = MAX_UPLOAD_MB * 1024 * 1024
 # Per-patient lifetime record cap (0 = unlimited; configurable via MAX_RECORDS_PER_PATIENT)
 MAX_RECORDS_PER_PATIENT = int(os.getenv("MAX_RECORDS_PER_PATIENT", "0"))
 
-# B0.3: Generic on-chain label — the real file name stays in the database only.
+# Generic on-chain label — the real file name stays in the database only.
 _ONCHAIN_FILE_NAME_LABEL = "encrypted-record"
 
 router = APIRouter(prefix="/records", tags=["records"])
@@ -67,8 +67,8 @@ async def upload_record(
     """
     IPFS Upload flow: Frontend -> Backend -> AES-256-GCM Encrypt -> Pinata IPFS -> Sepolia Blockchain anchoring.
     Only the CID, SHA-256 hash, and file metadata are anchored on-chain.
-    The real file name is stored ONLY in the database (B0.3 on-chain privacy).
-    Pinata upload and Sepolia tx broadcast run in parallel (B0.1 timing optimisation).
+    The real file name is stored ONLY in the database for on-chain privacy.
+    Pinata upload and Sepolia tx broadcast run concurrently.
     """
     # Rate limit uploads: 10 uploads per hour per user
     rate_limiter.check(
@@ -197,7 +197,7 @@ async def upload_record(
         verified_device_id = session.device_id
         verified_acquisition_source = session.acquisition_source or "LIVE_HARDWARE"
 
-    # B0.3 — Non-identifying IPFS filename (Part 9.1: zero PII or original names in public IPFS metadata)
+    # Non-identifying IPFS filename (zero PII or original names in public IPFS metadata)
     original_filename = file.filename or "medical_file"
     ipfs_filename = f"enc_{uuid.uuid4().hex}.bin"
 
@@ -243,7 +243,7 @@ async def upload_record(
                 cid,
                 original_hash,
                 verified_acquisition_hash,
-                _ONCHAIN_FILE_NAME_LABEL,   # B0.3: generic label, not the real filename
+                _ONCHAIN_FILE_NAME_LABEL,   # generic label, not the real filename
                 file_type,                  # category tag (no PII) kept on-chain
                 len(file_bytes),            # original size (no PII) kept on-chain
             )
@@ -252,7 +252,7 @@ async def upload_record(
                 cid,
                 cid,
                 original_hash,
-                _ONCHAIN_FILE_NAME_LABEL,   # B0.3: generic label, not the real filename
+                _ONCHAIN_FILE_NAME_LABEL,   # generic label, not the real filename
                 file_type,                  # category tag (no PII) kept on-chain
                 len(file_bytes),            # original size (no PII) kept on-chain
             )
@@ -534,12 +534,12 @@ def download_record(record_id: int, db: Session = Depends(get_db), current_user:
     """
     Download flow: IPFS (via Pinata gateway) → Backend → decrypt → verify hash against Sepolia → Frontend.
 
-    B0.2 Tamper handling:
+    Tamper handling:
       - Ciphertext altered (AES tag fails): returns 422 with X-Integrity-Verified: false
       - On-chain hash differs from decrypted file: returns 409 with X-Integrity-Verified: false
       - Blockchain unreachable: returns 502
 
-    B0.3 Privacy: the real file name is read from the DB (ipfs_file_name), not from the chain.
+    Privacy: the real file name is read from the DB (ipfs_file_name), not from the chain.
     """
     # 1. Get record
     record = db.query(MedicalRecord).filter(MedicalRecord.id == record_id).first()
@@ -598,7 +598,7 @@ def download_record(record_id: int, db: Session = Depends(get_db), current_user:
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to retrieve file from IPFS: {e}")
 
-    # 4. Decrypt — B0.2: AES tag failure is a clear tamper signal (422)
+    # 4. Decrypt — AES tag failure is a clear tamper signal (422)
     try:
         decrypted_bytes = crypto_service.decrypt(encrypted_bytes)
     except Exception:
@@ -624,7 +624,7 @@ def download_record(record_id: int, db: Session = Depends(get_db), current_user:
 
     recomputed_hash = hashlib.sha256(decrypted_bytes).hexdigest()
 
-    # Part 12 Fail-Closed: If on-chain hash is missing or not yet confirmed, never return unverified file
+    # Fail-Closed policy: If on-chain hash is missing or not yet confirmed, never return unverified file
     if not on_chain_hash:
         raise HTTPException(
             status_code=409,
@@ -635,7 +635,7 @@ def download_record(record_id: int, db: Session = Depends(get_db), current_user:
             headers={"X-Integrity-Verified": "false"},
         )
 
-    # B0.2: Hash mismatch is a clear tamper signal (409 Conflict)
+    # Hash mismatch is a clear tamper signal (409 Conflict)
     if recomputed_hash != on_chain_hash:
         raise HTTPException(
             status_code=409,
@@ -670,7 +670,7 @@ def download_record(record_id: int, db: Session = Depends(get_db), current_user:
 
     integrity_ok = True
 
-    # B0.3: real file name from DB, not from the chain
+    # Real file name from DB, not from the chain
     file_name = record.ipfs_file_name or f"record_{record_id}"
 
     headers = {

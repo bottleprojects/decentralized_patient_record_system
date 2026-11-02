@@ -32,7 +32,7 @@ def get_system_metrics(
 ):
     """
     Returns authentic system counters, storage statistics, and role-scoped record metadata.
-    Enforces authentication and eliminates fabricated integrity rates or unverified latency claims.
+    Enforces authentication and active patient consent boundaries.
     """
     # 1. Total records
     total_records = db.query(MedicalRecord).count()

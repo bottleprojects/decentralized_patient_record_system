@@ -61,7 +61,7 @@ def client(db_session):
 def test_users(db_session):
     # Patient A
     p_a = User(
-        email="patient_a@vit.edu",
+        email="patient_a@example.com",
         hashed_password=get_password_hash("Pass123!"),
         full_name="Patient Alpha",
         role=RoleEnum.patient,
@@ -69,7 +69,7 @@ def test_users(db_session):
     )
     # Patient B
     p_b = User(
-        email="patient_b@vit.edu",
+        email="patient_b@example.com",
         hashed_password=get_password_hash("Pass123!"),
         full_name="Patient Beta",
         role=RoleEnum.patient,
@@ -77,7 +77,7 @@ def test_users(db_session):
     )
     # Doctor A (Verified)
     d_a = User(
-        email="doctor_a@vit.edu",
+        email="doctor_a@example.com",
         hashed_password=get_password_hash("Pass123!"),
         full_name="Dr. Alice Smith",
         role=RoleEnum.doctor,
@@ -86,7 +86,7 @@ def test_users(db_session):
     )
     # Doctor B (Unverified)
     d_b = User(
-        email="doctor_b@vit.edu",
+        email="doctor_b@example.com",
         hashed_password=get_password_hash("Pass123!"),
         full_name="Dr. Bob Unverified",
         role=RoleEnum.doctor,

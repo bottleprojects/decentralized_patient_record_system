@@ -47,7 +47,7 @@ def test_telemetry_isolation_no_fallback(client, db_session):
 
     # Create patient with NO assigned device
     patient_no_device = User(
-        email="patient_nodevice@vit.edu",
+        email="patient_nodevice@example.com",
         hashed_password=get_password_hash("Pass123!"),
         full_name="Patient No Device",
         role=RoleEnum.patient,
@@ -146,16 +146,16 @@ def test_measurement_session_immutability(client, test_users):
 def test_prevent_public_admin_registration(client):
     # Attempt to publicly register as admin MUST be rejected with 403
     res = client.post("/users/register", json={
-        "email": "hacker_admin@test.com",
+        "email": "unauthorized_admin@example.com",
         "password": "Password123!",
-        "full_name": "Fake Administrator",
+        "full_name": "Unauthorized Administrator",
         "role": "admin",
     })
     assert res.status_code == 403
     assert "Public administrator registration is prohibited" in res.json()["detail"]
 
 
-def test_protected_metrics_and_no_fabrication(client, test_users):
+def test_protected_metrics_access(client, test_users):
     # 1. Unauthenticated request to /metrics MUST fail 401
     res = client.get("/metrics")
     assert res.status_code == 401
@@ -258,7 +258,7 @@ def test_server_side_provenance_validation(client, test_users, db_session):
     patient_id = test_users["patient_a"].id
 
     # 1. Uploading with non-existent session_id -> 404
-    dummy_file = ("ecg.pdf", io.BytesIO(b"%PDF-1.4 test file content"), "application/pdf")
+    sample_file = ("ecg.pdf", io.BytesIO(b"%PDF-1.4 test file content"), "application/pdf")
     res_fake_session = client.post(
         "/records/ipfs-upload",
         data={
@@ -267,7 +267,7 @@ def test_server_side_provenance_validation(client, test_users, db_session):
             "session_id": "non-existent-session-uuid",
             "acquisition_hash": "f" * 64,
         },
-        files={"file": dummy_file},
+        files={"file": sample_file},
         headers=headers,
     )
     assert res_fake_session.status_code == 404
@@ -285,7 +285,7 @@ def test_server_side_provenance_validation(client, test_users, db_session):
     db_session.add(session)
     db_session.commit()
 
-    dummy_file2 = ("ecg2.pdf", io.BytesIO(b"%PDF-1.4 test file content 2"), "application/pdf")
+    sample_file2 = ("ecg2.pdf", io.BytesIO(b"%PDF-1.4 test file content 2"), "application/pdf")
     res_mismatch = client.post(
         "/records/ipfs-upload",
         data={
@@ -294,7 +294,7 @@ def test_server_side_provenance_validation(client, test_users, db_session):
             "session_id": "valid-session-1234",
             "acquisition_hash": "b" * 64, # Mismatch!
         },
-        files={"file": dummy_file2},
+        files={"file": sample_file2},
         headers=headers,
     )
     assert res_mismatch.status_code == 400

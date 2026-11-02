@@ -21,7 +21,7 @@ export default function DoctorPatientView() {
   const [loading, setLoading] = useState(true);
   const [downloadingRecordId, setDownloadingRecordId] = useState<number | null>(null);
   const [integrityResults, setIntegrityResults] = useState<{ [key: number]: boolean | null }>({});
-  // B0.2: per-record error messages from tamper/integrity failures
+  // Per-record error messages from tamper/integrity failures
   const [downloadErrors, setDownloadErrors] = useState<{ [key: number]: string | null }>({});
 
   useEffect(() => {
@@ -60,7 +60,7 @@ export default function DoctorPatientView() {
         }
       });
 
-      // B0.2: 409 = hash mismatch (file altered), 422 = ciphertext corrupted — both are tamper signals
+      // 409 = hash mismatch (file altered), 422 = ciphertext corrupted — both are tamper signals
       if (response.status === 409 || response.status === 422) {
         const errorData = await response.json().catch(() => ({}));
         setIntegrityResults(prev => ({ ...prev, [recordId]: false }));
