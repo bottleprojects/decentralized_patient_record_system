@@ -17,7 +17,6 @@ is_postgres = engine.dialect.name == "postgresql"
 with engine.connect() as conn:
     if is_postgres:
         pg_migrations = [
-            "ALTER TABLE users DROP COLUMN IF EXISTS mfa_secret",
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS verification_status VARCHAR DEFAULT 'pending'",
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS license_number VARCHAR",
             "ALTER TABLE medical_records ADD COLUMN IF NOT EXISTS doctor_id INTEGER REFERENCES users(id)",
@@ -33,7 +32,6 @@ with engine.connect() as conn:
             "ALTER TABLE medical_records ADD COLUMN IF NOT EXISTS acquisition_source VARCHAR DEFAULT 'LIVE_HARDWARE'",
             "ALTER TABLE medical_records ALTER COLUMN supabase_file_path DROP NOT NULL",
             "ALTER TABLE medical_records ALTER COLUMN record_hash DROP NOT NULL",
-            "DELETE FROM medical_records WHERE blockchain_tx_hash IS NULL OR blockchain_tx_hash = '' OR created_at IS NULL OR file_type IS NULL OR file_type = ''",
         ]
         for stmt in pg_migrations:
             try:
@@ -56,7 +54,6 @@ with engine.connect() as conn:
             "ALTER TABLE medical_records ADD COLUMN session_id VARCHAR",
             "ALTER TABLE medical_records ADD COLUMN device_id VARCHAR",
             "ALTER TABLE medical_records ADD COLUMN acquisition_source VARCHAR DEFAULT 'LIVE_HARDWARE'",
-            "DELETE FROM medical_records WHERE blockchain_tx_hash IS NULL OR blockchain_tx_hash = '' OR created_at IS NULL OR file_type IS NULL OR file_type = ''",
         ]
         for stmt in sqlite_migrations:
             try:
@@ -129,10 +126,12 @@ async def handle_iot_client(reader: asyncio.StreamReader, writer: asyncio.Stream
                     try:
                         payload = json.loads(line)
                         if isinstance(payload, dict):
-                            from .routers.clinical import update_telemetry
-                            update_telemetry(payload)
+                            from .database import SessionLocal
+                            from .routers.clinical import process_raw_telemetry
+                            with SessionLocal() as db:
+                                process_raw_telemetry(payload, db)
                     except Exception as e:
-                        print(f"Warning [IoT TCP]: Invalid JSON received: {e}")
+                        print(f"Warning [IoT TCP]: Invalid telemetry frame received: {e}")
     except Exception as e:
         print(f"Warning [IoT TCP Client]: {e}")
     finally:
@@ -231,7 +230,8 @@ app.include_router(records.router)
 app.include_router(consent.router)
 app.include_router(audit.router)
 app.include_router(clinical.router)
-app.include_router(fhir.router)
+app.include_router(fhir.router, prefix="/fhir")
+app.include_router(fhir.router, prefix="/fhir/v4")
 app.include_router(metrics.router)
 
 from fastapi import Depends

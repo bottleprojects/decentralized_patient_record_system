@@ -136,6 +136,15 @@ describe("PatientRecord Smart Contract Security & Provenance", function () {
     await expect(contract.connect(owner).revokeConsent(doctor.address, "REC-CONSENT-01"))
       .to.emit(contract, "ConsentRevoked")
       .withArgs(owner.address, doctor.address, "REC-CONSENT-01");
+
+    // Reject unauthorized callers from spoofing consent events
+    await expect(
+      contract.connect(unauthorizedUser).grantConsent(doctor.address, "REC-CONSENT-01")
+    ).to.be.revertedWithCustomError(contract, "UnauthorizedCaller");
+
+    await expect(
+      contract.connect(unauthorizedUser).revokeConsent(doctor.address, "REC-CONSENT-01")
+    ).to.be.revertedWithCustomError(contract, "UnauthorizedCaller");
   });
 });
 

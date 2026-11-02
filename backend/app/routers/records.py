@@ -153,13 +153,40 @@ async def upload_record(
     original_filename = file.filename or "medical_file"
     ipfs_filename = f"enc_{uuid.uuid4().hex}.bin"
 
-    # B0.1 — Run Pinata upload first (must complete before we know the CID for the on-chain tx)
+    # 1. Create initial persistent record in pending_upload state (saga coordination)
+    record = MedicalRecord(
+        patient_id=patient_id,
+        doctor_id=assigned_doctor_id,
+        file_type=file_type,
+        supabase_file_path=None,
+        ipfs_cid=None,
+        ipfs_file_name=original_filename,   # real filename in DB only
+        ipfs_file_size=len(file_bytes),
+        record_hash=original_hash,
+        acquisition_hash=acquisition_hash,
+        session_id=session_id,
+        device_id=device_id,
+        acquisition_source=acquisition_source or "LIVE_HARDWARE",
+        blockchain_tx_hash=None,
+        blockchain_status="pending_upload",
+        description=description,
+    )
+    db.add(record)
+    db.commit()
+    db.refresh(record)
+
+    # 2. Upload to Pinata IPFS
     try:
         cid = ipfs_service.upload(encrypted_bytes, ipfs_filename)
+        record.ipfs_cid = cid
+        record.blockchain_status = "pending_anchor"
+        db.commit()
     except Exception as e:
+        record.blockchain_status = "upload_failed"
+        db.commit()
         raise HTTPException(status_code=500, detail=f"IPFS upload failed: {str(e)}")
 
-    # B0.1 — Broadcast Sepolia tx with hardware acquisition provenance if present
+    # 3. Broadcast Sepolia tx with hardware acquisition provenance if present
     tx_hash = None
     try:
         if acquisition_hash:
@@ -181,35 +208,18 @@ async def upload_record(
                 file_type,                  # category tag (no PII) kept on-chain
                 len(file_bytes),            # original size (no PII) kept on-chain
             )
+        record.blockchain_tx_hash = tx_hash
+        record.blockchain_status = "confirming"
+        audit = AuditLog(user_id=current_user.id, action="IPFS_UPLOAD_RECORD", resource_id=str(patient_id))
+        db.add(audit)
+        db.commit()
+        db.refresh(record)
     except Exception as e:
+        record.blockchain_status = "anchor_failed"
+        db.commit()
         raise HTTPException(status_code=500, detail=f"Blockchain anchoring failed: {str(e)}")
 
-    # Save to database immediately after broadcast (don't wait for receipt here —
-    # the tx_hash is already sufficient for the user to verify on Etherscan)
-    record = MedicalRecord(
-        patient_id=patient_id,
-        doctor_id=assigned_doctor_id,
-        file_type=file_type,
-        supabase_file_path=None,
-        ipfs_cid=cid,
-        ipfs_file_name=original_filename,   # real filename in DB only
-        ipfs_file_size=len(file_bytes),
-        record_hash=original_hash,
-        acquisition_hash=acquisition_hash,
-        session_id=session_id,
-        device_id=device_id,
-        acquisition_source=acquisition_source or "LIVE_HARDWARE",
-        blockchain_tx_hash=tx_hash,
-        blockchain_status="confirming",
-        description=description,
-    )
-    db.add(record)
-    audit = AuditLog(user_id=current_user.id, action="IPFS_UPLOAD_RECORD", resource_id=str(patient_id))
-    db.add(audit)
-    db.commit()
-    db.refresh(record)
-
-    # Launch background receipt verification
+    # 4. Launch background receipt verification
     background_tasks.add_task(confirm_blockchain_record, record.id, tx_hash)
 
     return {
@@ -244,6 +254,83 @@ def get_record_status(record_id: int, db: Session = Depends(get_db), current_use
         "blockchain_status": record.blockchain_status or "confirmed",
         "blockchain_tx_hash": record.blockchain_tx_hash,
     }
+
+
+@router.post("/{record_id}/retry-anchor", status_code=status.HTTP_200_OK)
+def retry_blockchain_anchor(
+    record_id: int,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Retry blockchain anchoring for a record whose IPFS upload succeeded
+    but blockchain transaction broadcast failed or remained unanchored.
+    """
+    record = db.query(MedicalRecord).filter(MedicalRecord.id == record_id).first()
+    if not record:
+        raise HTTPException(status_code=404, detail="Medical record not found")
+
+    if current_user.role == RoleEnum.patient and record.patient_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to retry anchoring for this record")
+    elif current_user.role == RoleEnum.doctor:
+        consent = db.query(Consent).filter(
+            Consent.patient_id == record.patient_id,
+            Consent.doctor_id == current_user.id,
+            Consent.status == "active",
+        ).first()
+        if not consent:
+            raise HTTPException(status_code=403, detail="No active consent for this patient")
+
+    if not record.ipfs_cid:
+        raise HTTPException(status_code=400, detail="Cannot anchor record without an existing IPFS CID. Upload must be restarted.")
+
+    if record.blockchain_status in ["confirmed", "confirming"]:
+        return {
+            "message": f"Record is already in state '{record.blockchain_status}'",
+            "record_id": record.id,
+            "tx_hash": record.blockchain_tx_hash,
+            "blockchain_status": record.blockchain_status,
+        }
+
+    try:
+        if record.acquisition_hash:
+            tx_hash = blockchain_service.store_ipfs_record_with_provenance(
+                record.ipfs_cid,
+                record.ipfs_cid,
+                record.record_hash,
+                record.acquisition_hash,
+                _ONCHAIN_FILE_NAME_LABEL,
+                record.file_type or "medical-record",
+                record.ipfs_file_size or 0,
+            )
+        else:
+            tx_hash = blockchain_service.store_ipfs_record(
+                record.ipfs_cid,
+                record.ipfs_cid,
+                record.record_hash,
+                _ONCHAIN_FILE_NAME_LABEL,
+                record.file_type or "medical-record",
+                record.ipfs_file_size or 0,
+            )
+        record.blockchain_tx_hash = tx_hash
+        record.blockchain_status = "confirming"
+        db.add(AuditLog(user_id=current_user.id, action="RETRY_BLOCKCHAIN_ANCHOR", resource_id=str(record.id)))
+        db.commit()
+        db.refresh(record)
+
+        background_tasks.add_task(confirm_blockchain_record, record.id, tx_hash)
+
+        return {
+            "message": "Blockchain anchor transaction resubmitted",
+            "record_id": record.id,
+            "tx_hash": tx_hash,
+            "blockchain_status": "confirming",
+        }
+    except Exception as e:
+        record.blockchain_status = "anchor_failed"
+        db.commit()
+        raise HTTPException(status_code=500, detail=f"Retry blockchain anchoring failed: {str(e)}")
 
 
 @router.get("")

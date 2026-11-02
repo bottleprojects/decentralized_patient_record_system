@@ -1,6 +1,7 @@
 import os
 import json
 import time
+import threading
 from datetime import datetime
 from web3 import Web3
 from web3.middleware import ExtraDataToPOAMiddleware
@@ -33,6 +34,8 @@ class BlockchainService:
         self.simulate_blockchain = SIMULATE_BLOCKCHAIN
         self.max_daily_tx = int(os.getenv("MAX_DAILY_TRANSACTIONS", "50"))
         self._simulated_records = {}
+        self._nonce_lock = threading.Lock()
+        self._tracked_nonce = None
 
         is_default_cfg = any(p in str(x).lower() for x in [RPC_URL, PRIVATE_KEY, CONTRACT_ADDRESS] for p in ["your", "default", "example"])
         if not RPC_URL or not PRIVATE_KEY or not CONTRACT_ADDRESS or is_default_cfg or not Web3.is_address(CONTRACT_ADDRESS):
@@ -113,11 +116,18 @@ class BlockchainService:
                 "At least 0.0002 ETH is required for transaction gas fees."
             )
 
-        # 3. Build, sign, and broadcast transaction
-        nonce = self.w3.eth.get_transaction_count(self.account.address)
-        tx = fn_call.build_transaction({"from": self.account.address, "nonce": nonce})
-        signed = self.w3.eth.account.sign_transaction(tx, private_key=PRIVATE_KEY)
-        tx_hash = self.w3.eth.send_raw_transaction(signed.raw_transaction)
+        # 3. Build, sign, and broadcast transaction with thread-safe nonce tracking
+        with self._nonce_lock:
+            pending_nonce = self.w3.eth.get_transaction_count(self.account.address, "pending")
+            if self._tracked_nonce is None or pending_nonce > self._tracked_nonce:
+                nonce = pending_nonce
+            else:
+                nonce = self._tracked_nonce
+
+            tx = fn_call.build_transaction({"from": self.account.address, "nonce": nonce})
+            signed = self.w3.eth.account.sign_transaction(tx, private_key=PRIVATE_KEY)
+            tx_hash = self.w3.eth.send_raw_transaction(signed.raw_transaction)
+            self._tracked_nonce = nonce + 1
 
         return self.w3.to_hex(tx_hash)
 

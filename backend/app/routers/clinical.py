@@ -72,6 +72,7 @@ class TelemetryIngest(BaseModel):
 
 class TelemetryModeUpdate(BaseModel):
     mode: str = "BOTH"  # "BOTH", "ECG_ONLY", "SPO2_ONLY"
+    device_id: Optional[str] = None
 
 
 class SessionStartRequest(BaseModel):
@@ -199,18 +200,58 @@ def assign_device_to_patient(
     return {"message": "Device assigned successfully", "device_id": device.device_id, "patient_id": data.patient_id}
 
 
+_device_modes = {}
+
+
 # --- IoT Telemetry Ingestion & Validation ---
 @router.post("/telemetry/mode", status_code=status.HTTP_200_OK)
-def set_telemetry_mode(data: TelemetryModeUpdate):
-    """Update active telemetry acquisition mode: BOTH, ECG_ONLY, or SPO2_ONLY."""
-    global _active_telemetry_mode
+def set_telemetry_mode(
+    data: TelemetryModeUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Update telemetry acquisition mode (BOTH, ECG_ONLY, or SPO2_ONLY).
+    Enforces authentication and role-based device access authorization.
+    """
     mode = data.mode.upper().strip()
-    if mode in {"BOTH", "ECG_ONLY", "SPO2_ONLY"}:
-        with _telemetry_lock:
+    if mode not in {"BOTH", "ECG_ONLY", "SPO2_ONLY"}:
+        raise HTTPException(status_code=400, detail="Invalid mode. Must be BOTH, ECG_ONLY, or SPO2_ONLY")
+
+    target_device_id = data.device_id.strip() if data.device_id else None
+
+    # Role-based authorization
+    if current_user.role == RoleEnum.patient:
+        if target_device_id:
+            dev = db.query(Device).filter(Device.device_id == target_device_id, Device.patient_id == current_user.id).first()
+            if not dev:
+                raise HTTPException(status_code=403, detail="Not authorized to configure telemetry mode for this device")
+        else:
+            dev = db.query(Device).filter(Device.patient_id == current_user.id).first()
+            if dev:
+                target_device_id = dev.device_id
+    elif current_user.role == RoleEnum.doctor:
+        if current_user.verification_status != "verified":
+            raise HTTPException(status_code=403, detail="Unverified doctor cannot configure telemetry mode")
+        if target_device_id:
+            dev = db.query(Device).filter(Device.device_id == target_device_id).first()
+            if dev and dev.patient_id:
+                verify_doctor_access(dev.patient_id, db, current_user)
+    elif current_user.role != RoleEnum.admin:
+        raise HTTPException(status_code=403, detail="Not authorized to configure telemetry mode")
+
+    with _telemetry_lock:
+        if target_device_id:
+            _device_modes[target_device_id] = mode
+            if target_device_id in _device_telemetry:
+                _device_telemetry[target_device_id]["mode"] = mode
+        else:
+            global _active_telemetry_mode
             _active_telemetry_mode = mode
             for dev in _device_telemetry.values():
                 dev["mode"] = mode
-    return {"status": "ok", "mode": _active_telemetry_mode}
+
+    return {"status": "ok", "mode": mode, "device_id": target_device_id}
 
 
 @router.get("/telemetry/mode")
@@ -220,16 +261,16 @@ def get_telemetry_mode():
         return {"mode": _active_telemetry_mode}
 
 
-@router.post("/telemetry/ingest", status_code=status.HTTP_200_OK)
-def ingest_telemetry(data: TelemetryIngest, db: Session = Depends(get_db)):
+def process_raw_telemetry(payload: dict, db: Session) -> dict:
     """
-    Ingest and validate live telemetry packet from ESP32 vitals sensor.
+    Shared, unified telemetry validation engine used by both HTTP REST and TCP raw socket paths.
     Enforces:
     1. Device authentication (HMAC-SHA256 signature verification if secret configured).
     2. Packet freshness (rejects stale packets older than 10.0 seconds).
     3. Anti-replay protection (strictly monotonic sequence counters).
     4. Isolation into per-device memory buffers.
     """
+    data = TelemetryIngest(**payload) if isinstance(payload, dict) else payload
     device_id = data.device_id.strip()
 
     # 1. Device Registration Check
@@ -272,7 +313,7 @@ def ingest_telemetry(data: TelemetryIngest, db: Session = Depends(get_db)):
 
     # 5. Store in Per-Device In-Memory Store
     with _telemetry_lock:
-        current_mode = _active_telemetry_mode
+        current_mode = _device_modes.get(device_id, _active_telemetry_mode)
         _device_telemetry[device_id] = {
             "device_id": device_id,
             "session_id": data.session_id,
@@ -297,6 +338,12 @@ def ingest_telemetry(data: TelemetryIngest, db: Session = Depends(get_db)):
             db.commit()
 
     return {"status": "ok", "mode": current_mode, "device_id": device_id}
+
+
+@router.post("/telemetry/ingest", status_code=status.HTTP_200_OK)
+def ingest_telemetry(data: TelemetryIngest, db: Session = Depends(get_db)):
+    """Ingest and validate live telemetry packet via HTTP REST."""
+    return process_raw_telemetry(data.dict(), db)
 
 
 @router.get("/telemetry/latest")
@@ -341,7 +388,27 @@ def get_latest_telemetry(
         .first()
     )
 
-    device_id = assigned_device.device_id if assigned_device else "ESP32-VITALS-01"
+    if not assigned_device:
+        return {
+            "connected": False,
+            "age_seconds": None,
+            "device_id": None,
+            "finger_detected": False,
+            "ir_value": 0,
+            "leads_off": True,
+            "heart_rate": 0,
+            "spo2": 0,
+            "ecg_samples": [],
+            "mode": _active_telemetry_mode,
+            "timestamp": None,
+            "patient_id": target_patient_id,
+            "patient_name": target_patient_name,
+            "patient_email": target_patient_email,
+            "acquisition_source": "UNAVAILABLE",
+            "message": "No active sensor device assigned to this patient",
+        }
+
+    device_id = assigned_device.device_id
 
     with _telemetry_lock:
         # Retrieve packet specific to this device
@@ -402,11 +469,20 @@ def start_measurement_session(
     else:
         raise HTTPException(status_code=403, detail="Not authorized to initiate measurement sessions")
 
+    target_device_id = data.device_id
+    if not target_device_id:
+        assigned_device = (
+            db.query(Device)
+            .filter(Device.patient_id == target_patient_id, Device.device_status == "active")
+            .first()
+        )
+        target_device_id = assigned_device.device_id if assigned_device else "UNKNOWN_DEVICE"
+
     session_id = str(uuid.uuid4())
     session = MeasurementSession(
         session_id=session_id,
         patient_id=target_patient_id,
-        device_id=data.device_id or "ESP32-VITALS-01",
+        device_id=target_device_id,
         capture_mode=data.capture_mode or "BOTH",
         status="ACQUIRING",
         started_at=datetime.utcnow(),
@@ -445,6 +521,12 @@ def complete_measurement_session(
     elif session.patient_id != current_user.id and current_user.role != RoleEnum.admin:
         raise HTTPException(status_code=403, detail="Not authorized to complete this session")
 
+    if session.status != "ACQUIRING":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Measurement session '{session.session_id}' cannot be modified. Current status is '{session.status}'. Finalized sessions are immutable.",
+        )
+
     completed_at = datetime.utcnow()
     sample_count = len(data.ecg_samples or [])
 
@@ -455,8 +537,9 @@ def complete_measurement_session(
 
     # Construct canonical measurement manifest
     manifest_dict = {
-        "device_id": session.device_id or "ESP32-VITALS-01",
+        "device_id": session.device_id or "UNKNOWN_DEVICE",
         "session_id": session.session_id,
+        "session_nonce": session.session_id[:16],
         "patient_id": session.patient_id,
         "capture_mode": session.capture_mode,
         "started_at": session.started_at.isoformat() + "Z",

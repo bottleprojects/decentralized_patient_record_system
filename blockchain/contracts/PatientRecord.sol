@@ -25,6 +25,7 @@ contract PatientRecord is Ownable, Pausable {
     error EmptyContentIdentifier();
     error EmptyDigest();
     error RecordNotFound(string recordId);
+    error InvalidAddress();
 
     // Authorized writer whitelist (backend notary addresses)
     mapping(address => bool) public authorizedWriters;
@@ -190,12 +191,14 @@ contract PatientRecord is Ownable, Pausable {
         );
     }
 
-    // Record consent audit events (Access permissions enforced by backend/database)
-    function grantConsent(address doctor, string memory recordId) public whenNotPaused {
+    // Record consent audit events (Access permissions enforced by backend/database; caller must be authorized writer or contract owner)
+    function grantConsent(address doctor, string memory recordId) public whenNotPaused onlyAuthorized {
+        if (doctor == address(0)) revert InvalidAddress();
         emit ConsentGranted(msg.sender, doctor, recordId);
     }
 
-    function revokeConsent(address doctor, string memory recordId) public whenNotPaused {
+    function revokeConsent(address doctor, string memory recordId) public whenNotPaused onlyAuthorized {
+        if (doctor == address(0)) revert InvalidAddress();
         emit ConsentRevoked(msg.sender, doctor, recordId);
     }
 }
