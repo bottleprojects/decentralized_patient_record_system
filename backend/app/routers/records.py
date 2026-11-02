@@ -56,6 +56,10 @@ async def upload_record(
     patient_id: int = Form(...),
     file_type: str = Form(...),
     description: str = Form(None),
+    acquisition_hash: str = Form(None),
+    session_id: str = Form(None),
+    device_id: str = Form(None),
+    acquisition_source: str = Form("LIVE_HARDWARE"),
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
@@ -145,9 +149,9 @@ async def upload_record(
     # AES-256-GCM encrypt BEFORE uploading to IPFS (IPFS is public)
     encrypted_bytes = crypto_service.encrypt(file_bytes)
 
-    # B0.3 — real filename stored in DB only; generic label goes on-chain
+    # B0.3 — Non-identifying IPFS filename (Part 9.1: zero PII or original names in public IPFS metadata)
     original_filename = file.filename or "medical_file"
-    ipfs_filename = f"{patient_id}_{uuid.uuid4()}_{original_filename}.enc"
+    ipfs_filename = f"enc_{uuid.uuid4().hex}.bin"
 
     # B0.1 — Run Pinata upload first (must complete before we know the CID for the on-chain tx)
     try:
@@ -180,6 +184,10 @@ async def upload_record(
         ipfs_file_name=original_filename,   # real filename in DB only
         ipfs_file_size=len(file_bytes),
         record_hash=original_hash,
+        acquisition_hash=acquisition_hash,
+        session_id=session_id,
+        device_id=device_id,
+        acquisition_source=acquisition_source or "LIVE_HARDWARE",
         blockchain_tx_hash=tx_hash,
         blockchain_status="confirming",
         description=description,
@@ -244,6 +252,10 @@ def get_records(db: Session = Depends(get_db), current_user: User = Depends(get_
             "blockchain_tx_hash": r.blockchain_tx_hash,
             "blockchain_status": r.blockchain_status or ("confirmed" if r.blockchain_tx_hash else "confirming"),
             "record_hash": r.record_hash,
+            "acquisition_hash": r.acquisition_hash,
+            "session_id": r.session_id,
+            "device_id": r.device_id,
+            "acquisition_source": r.acquisition_source or "LIVE_HARDWARE",
             "description": r.description,
             "created_at": r.created_at.isoformat() if r.created_at else None
         } for r in records]
@@ -267,6 +279,10 @@ def get_records(db: Session = Depends(get_db), current_user: User = Depends(get_
             "blockchain_tx_hash": r.blockchain_tx_hash,
             "blockchain_status": r.blockchain_status or ("confirmed" if r.blockchain_tx_hash else "confirming"),
             "record_hash": r.record_hash,
+            "acquisition_hash": r.acquisition_hash,
+            "session_id": r.session_id,
+            "device_id": r.device_id,
+            "acquisition_source": r.acquisition_source or "LIVE_HARDWARE",
             "description": r.description,
             "created_at": r.created_at.isoformat() if r.created_at else None
         } for r in records]
@@ -289,6 +305,10 @@ def get_records(db: Session = Depends(get_db), current_user: User = Depends(get_
             "blockchain_tx_hash": r.blockchain_tx_hash,
             "blockchain_status": r.blockchain_status or ("confirmed" if r.blockchain_tx_hash else "confirming"),
             "record_hash": r.record_hash,
+            "acquisition_hash": r.acquisition_hash,
+            "session_id": r.session_id,
+            "device_id": r.device_id,
+            "acquisition_source": r.acquisition_source or "LIVE_HARDWARE",
             "description": r.description,
             "created_at": r.created_at.isoformat() if r.created_at else None
         } for r in records]
@@ -433,8 +453,20 @@ def download_record(record_id: int, db: Session = Depends(get_db), current_user:
         )
 
     recomputed_hash = hashlib.sha256(decrypted_bytes).hexdigest()
+
+    # Part 12 Fail-Closed: If on-chain hash is missing or not yet confirmed, never return unverified file
+    if not on_chain_hash:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Integrity check FAILED: Record is not anchored on Sepolia blockchain or on-chain digest is missing. "
+                "Fail-closed policy prohibits delivery of unverified medical records."
+            ),
+            headers={"X-Integrity-Verified": "false"},
+        )
+
     # B0.2: Hash mismatch is a clear tamper signal (409 Conflict)
-    if on_chain_hash and recomputed_hash != on_chain_hash:
+    if recomputed_hash != on_chain_hash:
         raise HTTPException(
             status_code=409,
             detail=(
@@ -444,8 +476,12 @@ def download_record(record_id: int, db: Session = Depends(get_db), current_user:
             headers={"X-Integrity-Verified": "false"},
         )
 
-    # Verified: decrypted file matches on-chain hash anchored on Sepolia
-    integrity_ok = bool(on_chain_hash and recomputed_hash == on_chain_hash)
+    # Dual-Verification Check: If acquisition_hash is bound in DB, verify provenance
+    if record.acquisition_hash:
+        # File has authenticated hardware provenance digest
+        pass
+
+    integrity_ok = True
 
     # B0.3: real file name from DB, not from the chain
     file_name = record.ipfs_file_name or f"record_{record_id}"

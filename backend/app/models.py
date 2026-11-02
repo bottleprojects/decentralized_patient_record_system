@@ -24,6 +24,69 @@ class User(Base):
     # Relationships
     records_as_patient = relationship("MedicalRecord", back_populates="patient", foreign_keys="MedicalRecord.patient_id")
     records_as_doctor = relationship("MedicalRecord", back_populates="doctor", foreign_keys="MedicalRecord.doctor_id")
+    devices = relationship("Device", back_populates="patient", foreign_keys="Device.patient_id")
+    measurement_sessions = relationship("MeasurementSession", back_populates="patient", foreign_keys="MeasurementSession.patient_id")
+
+class Device(Base):
+    __tablename__ = "devices"
+
+    id = Column(Integer, primary_key=True, index=True)
+    device_id = Column(String, unique=True, index=True, nullable=False) # e.g. "ESP32-VITALS-01"
+    patient_id = Column(Integer, ForeignKey("users.id"), nullable=True) # associated patient
+    device_status = Column(String, default="active") # active, revoked, suspended
+    device_model = Column(String, default="ESP32-WROOM-32")
+    firmware_version = Column(String, default="1.0.0")
+    secret_key_hash = Column(String, nullable=True) # SHA-256 hex of device-unique pre-shared HMAC key
+    registered_at = Column(DateTime, default=datetime.utcnow)
+    last_seen_at = Column(DateTime, nullable=True)
+    revoked_at = Column(DateTime, nullable=True)
+
+    patient = relationship("User", back_populates="devices", foreign_keys=[patient_id])
+    sessions = relationship("MeasurementSession", back_populates="device")
+
+class MeasurementSession(Base):
+    __tablename__ = "measurement_sessions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    session_id = Column(String, unique=True, index=True, nullable=False) # UUID
+    patient_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    device_id = Column(String, ForeignKey("devices.device_id"), nullable=True)
+    capture_mode = Column(String, default="BOTH") # BOTH, ECG_ONLY, SPO2_ONLY
+    status = Column(String, default="IDLE") # IDLE, CALIBRATING, ACQUIRING, VALIDATING, CAPTURE_COMPLETE, FAILED, CANCELLED
+    started_at = Column(DateTime, default=datetime.utcnow)
+    completed_at = Column(DateTime, nullable=True)
+    sampling_rate_hz = Column(Integer, default=500)
+    sample_count = Column(Integer, default=0)
+    quality_status = Column(String, default="VALID") # VALID, INVALID, SIGNAL_UNAVAILABLE, INSUFFICIENT_SIGNAL
+    acquisition_source = Column(String, default="LIVE_HARDWARE") # LIVE_HARDWARE, DEMO_SIMULATED, UNAVAILABLE
+    firmware_version = Column(String, default="1.0.0")
+    raw_manifest_hash = Column(String, nullable=True) # Acquisition digest H_acq (SHA-256)
+
+    patient = relationship("User", back_populates="measurement_sessions", foreign_keys=[patient_id])
+    device = relationship("Device", back_populates="sessions", foreign_keys=[device_id])
+    telemetry_packets = relationship("TelemetryPacket", back_populates="session")
+
+class TelemetryPacket(Base):
+    __tablename__ = "telemetry_packets"
+
+    id = Column(Integer, primary_key=True, index=True)
+    device_id = Column(String, index=True, nullable=False)
+    patient_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    session_id = Column(String, ForeignKey("measurement_sessions.session_id"), nullable=True)
+    sequence_number = Column(Integer, nullable=False, default=0)
+    device_timestamp = Column(DateTime, nullable=False)
+    server_timestamp = Column(DateTime, default=datetime.utcnow)
+    heart_rate = Column(Integer, nullable=True)
+    spo2 = Column(Integer, nullable=True)
+    ir_value = Column(Integer, nullable=True)
+    red_value = Column(Integer, nullable=True)
+    ecg_samples = Column(Text, nullable=True) # JSON list of integer ADC samples
+    sample_rate_hz = Column(Integer, default=500)
+    signal_quality = Column(String, default="VALID")
+    acquisition_source = Column(String, default="LIVE_HARDWARE")
+    verification_status = Column(String, default="VALID") # VALID, INVALID_SIG, REPLAY_REJECTED, STALE
+
+    session = relationship("MeasurementSession", back_populates="telemetry_packets")
 
 class MedicalRecord(Base):
     __tablename__ = "medical_records"
@@ -31,7 +94,7 @@ class MedicalRecord(Base):
     id = Column(Integer, primary_key=True, index=True)
     patient_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     doctor_id = Column(Integer, ForeignKey("users.id"), nullable=True)
-    file_type = Column(String, nullable=False) # e.g., 'Blood Test', 'Prescription'
+    file_type = Column(String, nullable=False) # e.g., 'Blood Test', 'Prescription', 'Vitals Telemetry'
     supabase_file_path = Column(String, nullable=True) # Path in Supabase storage (nullable for IPFS-only records)
     ipfs_hash = Column(String, nullable=True) # Kept for legacy compat
     ipfs_cid = Column(String, nullable=True) # IPFS Content Identifier (CID) from Pinata
@@ -40,6 +103,10 @@ class MedicalRecord(Base):
     blockchain_tx_hash = Column(String, nullable=True) # The tx hash where the record hash was stored
     blockchain_status = Column(String, default="confirming") # confirming, confirmed, failed
     record_hash = Column(String, nullable=True) # SHA-256 hash of the original file (pre-encrypt)
+    acquisition_hash = Column(String, nullable=True) # SHA-256 of acquisition manifest (hardware provenance digest)
+    session_id = Column(String, nullable=True) # Bound measurement session identifier
+    device_id = Column(String, nullable=True) # Bound hardware device identifier
+    acquisition_source = Column(String, default="LIVE_HARDWARE") # LIVE_HARDWARE, DEMO_SIMULATED, IMPORTED_MEASUREMENT
     description = Column(String, nullable=True) # Description of the medical record
     created_at = Column(DateTime, default=datetime.utcnow)
 

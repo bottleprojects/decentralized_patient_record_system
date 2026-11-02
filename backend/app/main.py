@@ -27,6 +27,10 @@ with engine.connect() as conn:
             "ALTER TABLE medical_records ADD COLUMN IF NOT EXISTS ipfs_file_name VARCHAR",
             "ALTER TABLE medical_records ADD COLUMN IF NOT EXISTS ipfs_file_size INTEGER",
             "ALTER TABLE medical_records ADD COLUMN IF NOT EXISTS blockchain_status VARCHAR DEFAULT 'confirmed'",
+            "ALTER TABLE medical_records ADD COLUMN IF NOT EXISTS acquisition_hash VARCHAR",
+            "ALTER TABLE medical_records ADD COLUMN IF NOT EXISTS session_id VARCHAR",
+            "ALTER TABLE medical_records ADD COLUMN IF NOT EXISTS device_id VARCHAR",
+            "ALTER TABLE medical_records ADD COLUMN IF NOT EXISTS acquisition_source VARCHAR DEFAULT 'LIVE_HARDWARE'",
             "ALTER TABLE medical_records ALTER COLUMN supabase_file_path DROP NOT NULL",
             "ALTER TABLE medical_records ALTER COLUMN record_hash DROP NOT NULL",
             "DELETE FROM medical_records WHERE blockchain_tx_hash IS NULL OR blockchain_tx_hash = '' OR created_at IS NULL OR file_type IS NULL OR file_type = ''",
@@ -48,6 +52,10 @@ with engine.connect() as conn:
             "ALTER TABLE medical_records ADD COLUMN ipfs_file_name VARCHAR",
             "ALTER TABLE medical_records ADD COLUMN ipfs_file_size INTEGER",
             "ALTER TABLE medical_records ADD COLUMN blockchain_status VARCHAR DEFAULT 'confirmed'",
+            "ALTER TABLE medical_records ADD COLUMN acquisition_hash VARCHAR",
+            "ALTER TABLE medical_records ADD COLUMN session_id VARCHAR",
+            "ALTER TABLE medical_records ADD COLUMN device_id VARCHAR",
+            "ALTER TABLE medical_records ADD COLUMN acquisition_source VARCHAR DEFAULT 'LIVE_HARDWARE'",
             "DELETE FROM medical_records WHERE blockchain_tx_hash IS NULL OR blockchain_tx_hash = '' OR created_at IS NULL OR file_type IS NULL OR file_type = ''",
         ]
         for stmt in sqlite_migrations:
