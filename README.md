@@ -12,38 +12,27 @@ A privacy-preserving, decentralized electronic health record (EHR) and biometric
 
 ---
 
-## System Architecture
+## System Architecture & Data Flow
 
-```mermaid
-flowchart TD
-    subgraph IoT Edge Hardware
-        ECG[AD8232 ECG Sensor 500 Hz] -->|ADC1 / O(1) ISR Buffer| ESP[ESP32 Microcontroller]
-        PPG[MAX30102 PPG Sensor 100 Hz] -->|I2C SDA/SCL| ESP
-        ESP -->|HMAC-SHA256 Edge Tag| TLS[TLS / HTTPS Client]
-    end
+The system operates across four coordinated tiers:
 
-    subgraph DPRMS Backend (FastAPI)
-        TLS -->|Telemetry Ingest| API[FastAPI Gateway]
-        API --> AUTH[Role & Consent Validator]
-        AUTH --> ENC[AES-256-GCM Encryption Engine]
-        AUTH --> DB[(PostgreSQL / SQLite Database)]
-        ENC --> PINATA[Pinata IPFS Service]
-        ENC --> ETH[Web3 Blockchain Anchoring Service]
-    end
+1. **Biomedical Edge Layer (ESP32 IoT Gateway)**:
+   - **AD8232 ECG Sensor**: Sampled at 500 Hz on ADC1 via a deterministic, $O(1)$ statically-allocated lockless ISR ring buffer (zero heap allocations in interrupt context).
+   - **MAX30102 PPG Sensor**: Optical pulse oximetry sampled at 100 Hz over I2C (400 kHz Fast-Mode) measuring SpO2 and pulse rate.
+   - **Edge Attestation**: Telemetry packets signed with hardware-accelerated HMAC-SHA256 and transmitted over TLS/HTTPS to the backend ingestion endpoint.
 
-    subgraph Decentralized Layers
-        PINATA -->|Encrypted Payload| IPFS[Public IPFS Network]
-        ETH -->|CID + Hash + Provenance| CONTRACT[PatientRecord.sol on Sepolia]
-    end
+2. **Backend Application Layer (FastAPI & PostgreSQL)**:
+   - **Role & Consent Engine**: Enforces strict HIPAA/GDPR clinical data authorization. Patients control physician access; verified doctor credentials are required.
+   - **Symmetric Encryption**: Client files are encrypted via AES-256-GCM with unique initialization vectors prior to IPFS dispatch.
+   - **Standards Compliance**: Native FHIR R4 endpoints (`/fhir` and `/fhir/v4`) export standard LOINC and UCUM coded clinical resources.
+   - **Saga Orchestration**: Atomic multi-stage persistence pipeline (`pending_upload` -> `pending_anchor` -> `confirming` -> `confirmed`) with auto-recovery retry endpoints and thread-safe transaction nonce locking.
 
-    subgraph Client Application
-        USER[Patient / Verified Doctor / Admin] -->|SPA Interface| WEB[React + Vite Frontend]
-        WEB -->|JWT Bearer Token| API
-        WEB -->|Etherscan Verification| CONTRACT
-        WEB -->|FHIR R4 Ingestion| FHIR_MOD[/fhir/v4 Endpoints/]
-        API --> FHIR_MOD
-    end
-```
+3. **Decentralized Storage & Blockchain State Layer**:
+   - **Off-Chain IPFS Storage**: Encrypted files pinned via Pinata with non-identifying randomized CIDs (`enc_<uuid>.bin`). Zero PII/PHI stored off-chain.
+   - **On-Chain Smart Contract (`PatientRecord.sol`)**: Anchors immutable cryptographic proofs (SHA-256 document hash, IPFS CID, and hardware provenance hash) on Ethereum Sepolia.
+
+4. **Web Client Application Layer (React + Vite)**:
+   - Role-based portals for Patients, Doctors, and Administrators with direct Etherscan verification, consent management, and live telemetry streaming.
 
 ---
 
@@ -90,7 +79,6 @@ decentralized_patient_record_system/
 │   └── platformio.ini         # PlatformIO Build & Upload Environment
 ├── hardware/                  # Physical Schematics & Reference Firmware
 │   └── esp32_firmware/        # Arduino IDE Reference Sketch (.ino)
-├── docs/                      # Technical Documentation & Diagrams
 ├── DEPLOY.md                  # Click-by-Click Production Cloud Deployment Guide
 └── README.md                  # Project Overview & Quickstart Guide
 ```

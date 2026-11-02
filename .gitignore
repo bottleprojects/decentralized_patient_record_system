@@ -19,6 +19,7 @@ test.json
 # Legal & Patent Disclosures
 *DISCLOSURE*
 *disclosure*
+docs/
 # Firmware & Hardware
 # firmware/ (tracked for complete hardware implementation)
 *.ino
