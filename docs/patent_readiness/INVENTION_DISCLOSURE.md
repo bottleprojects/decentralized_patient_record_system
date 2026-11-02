@@ -13,7 +13,7 @@
 The present invention provides an end-to-end, zero-trust biomedical informatics system that establishes an immutable chain of custody from physical physiological sensors to decentralized cloud archival and public blockchain anchoring.
 
 **Problem Statement:**
-Current Electronic Health Record (EHR) frameworks and first-generation blockchain architectures (e.g., MedRec, Ancile) operate exclusively at the application layer. They accept clinical data files uploaded via web portals or mobile applications without cryptographically authenticating the physical sensor hardware. This creates a critical "origin vulnerability" (garbage-in, immutable-garbage-out), where spoofed telemetry, synthetic ECG waveforms, or replayed vital signs are permanently sealed on-chain as genuine. Furthermore, directly storing high-throughput raw physiological streams on public blockchains is economically and technically impossible due to block gas limits (exceeding 3.2 billion gas per megabyte), while centralized cloud repositories (AWS S3, Supabase) present single points of failure (SPOF) and mutable audit logs.
+Current Electronic Health Record (EHR) frameworks and first-generation blockchain architectures (e.g., MedRec, Ancile) operate exclusively at the application layer. They accept clinical data files uploaded via web portals or mobile applications without cryptographically authenticating the physical sensor hardware. This creates a critical "origin vulnerability" (garbage-in, immutable-garbage-out), where unauthenticated telemetry, manipulated signals, or replayed vital signs are permanently sealed on-chain without verification. Furthermore, directly storing high-throughput raw physiological streams on public blockchains is economically and technically impossible due to block gas limits (exceeding 3.2 billion gas per megabyte), while centralized cloud repositories (AWS S3, Supabase) present single points of failure (SPOF) and mutable audit logs.
 
 **Solution Statement:**
 The invention resolves this problem through a multi-tier provenance architecture:
@@ -50,7 +50,7 @@ Physiological sensor provenance; edge cryptographic attestation; hardware-rooted
 
 **Limitations of the Same:**
 1. Single Point of Failure (SPOF) and Ransomware: Centralized hospital databases represent high-value targets for cyberattacks. A database breach or ransomware lockout paralyses hospital operations and exposes millions of unencrypted records.
-2. Complete Absence of Hardware Sensor Provenance: Existing systems assume that any data received from an authorized user's portal or app is authentic. If a terminal is compromised, an adversary can submit falsified physiological readings (e.g. normal 74 BPM / 98% SpO2 or synthetic ECG waveforms), and the blockchain will faithfully record the fraudulent file hash.
+2. Complete Absence of Hardware Sensor Provenance: Existing systems assume that any data received from an authorized user's portal or app is authentic. If a terminal is compromised, an adversary can submit unauthenticated or manipulated physiological readings, and the blockchain will faithfully record the fraudulent file hash.
 3. Vulnerability to Packet Replay & Injection: Standard telemetry streams lack hardware-enforced sequence counters and sliding-window timestamp validation, allowing attackers to replay stale historical packets.
 4. Prohibitive Blockchain Gas Economics: Storing raw physiological time-series data on public blockchains costs > 3.2 billion gas per megabyte, exceeding the 30M Ethereum block limit by > 20x.
 5. Ineffective On-Chain Access Control Claims: Prior art claims smart contracts enforce data access permissions. In reality, smart contracts cannot restrict off-chain decryption once ciphertext is distributed, and storing patient access lists on-chain violates privacy laws (GDPR Art. 9) by leaking clinical interaction patterns.
@@ -134,7 +134,7 @@ The invention provides four foundational differentiators over existing literatur
 ### 10. Advantages & Improvements Over Existing Methods
 - **99.998% Gas Cost Reduction:** Reduces transaction cost from > 672 million gas ($40,000+) to 87,412 gas (~$3.50 on Ethereum L1, <$0.02 on L2 rollups).
 - **Zero Cloud Lock-In & Elimination of SPOF:** Content-addressed IPFS archival eliminates recurring database egress tariffs and centralized cloud vulnerability.
-- **Tamper-Proof Origin Guarantee:** Prevents synthetic waveforms or spoofed pulse oximetry readings from being recorded as genuine clinical data.
+- **Tamper-Proof Origin Guarantee:** Prevents unauthenticated waveforms or spoofed readings from being recorded as verified clinical telemetry.
 - **Sub-Second Telemetry Latency:** Achieves 381.98 ms warm retrieval for real-time clinical bedside monitoring.
 
 ---

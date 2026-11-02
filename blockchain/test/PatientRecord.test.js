@@ -36,11 +36,11 @@ describe("PatientRecord Smart Contract Security & Provenance", function () {
   it("Should REJECT unauthorized accounts attempting to store records (Part 10.1)", async function () {
     await expect(
       contract.connect(unauthorizedUser).storeIPFSRecord(
-        "REC-HACK",
-        "QmHackedCID",
-        "hacked_hash",
-        "fake-record",
-        "Fake",
+        "REC-UNAUTH-01",
+        "QmUnauthorizedCID",
+        "unauthorized_hash_digest",
+        "test-record",
+        "Observation",
         100
       )
     ).to.be.revertedWithCustomError(contract, "UnauthorizedCaller");

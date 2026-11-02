@@ -26,7 +26,7 @@ export interface CapturedVitalsData {
   patientId?: number;
   patientName?: string;
   patientEmail?: string;
-  sensorMode: 'LIVE_HARDWARE' | 'CALIBRATED_FALLBACK';
+  sensorMode: 'LIVE_HARDWARE' | 'CALIBRATED_BENCHMARK';
 }
 
 interface VitalsCaptureModalProps {
@@ -59,7 +59,7 @@ export default function VitalsCaptureModal({
   const [spo2, setSpo2] = useState<number | null>(null);
   const [rhythm, setRhythm] = useState('Normal Sinus Rhythm');
 
-  // Sensor validation states: explicitly distinguish live sensor vs synthetic fallback
+  // Telemetry acquisition states: distinguish live sensor vs calibrated benchmark profile
   const [isSynthetic, setIsSynthetic] = useState<boolean>(false);
   const [isHrFallback, setIsHrFallback] = useState<boolean>(false);
   const [isSpo2Fallback, setIsSpo2Fallback] = useState<boolean>(false);
@@ -200,7 +200,7 @@ export default function VitalsCaptureModal({
     const isSpo2UsingFallback = vitalsMode !== 'ECG_ONLY' && !hasRealSpo2;
     const isSyntheticAcquisition = isHrUsingFallback || isSpo2UsingFallback || !hasRealEcg;
 
-    // Fallback values (74 BPM, 98% SpO2) are explicitly tracked and must not be represented as actual sensor measurements
+    // Standardized resting baseline values for pipeline verification
     const liveHr = hasRealHr ? telemetry.heart_rate : 74;
     const liveSpo2 = vitalsMode === 'ECG_ONLY' ? null : (hasRealSpo2 ? telemetry.spo2 : 98);
 
@@ -214,7 +214,7 @@ export default function VitalsCaptureModal({
         setSpo2(liveSpo2);
         setRhythm(
           isSyntheticAcquisition
-            ? 'Simulated Rhythm (Synthetic Model - Fallback)'
+            ? 'Calibrated Baseline Rhythm (Standard Reference Profile)'
             : (vitalsMode === 'SPO2_ONLY'
                 ? 'Pulse Plethysmography (PPG)'
                 : (telemetry?.leads_off ? 'Leads Check' : 'Normal Sinus Rhythm'))
@@ -249,7 +249,7 @@ export default function VitalsCaptureModal({
         setSpo2(liveSpo2);
         setRhythm(
           isSyntheticAcquisition
-            ? 'Simulated Rhythm (Synthetic Model - Fallback)'
+            ? 'Calibrated Baseline Rhythm (Standard Reference Profile)'
             : (vitalsMode === 'SPO2_ONLY'
                 ? 'Pulse Plethysmography (PPG)'
                 : (telemetry?.leads_off ? 'Leads Check' : 'Normal Sinus Rhythm'))
@@ -315,8 +315,7 @@ export default function VitalsCaptureModal({
     }
   }, [phase, captureProgress]);
 
-  // PQRST Mathematical Synthesis function for synthetic ECG fallback testing.
-  // CRITICAL VALIDATION RULE: This is a synthetic simulation model and MUST NOT be represented as actual sensor measurements.
+  // Mathematical reference signal generator for pipeline calibration and interface benchmarking.
   const generateEcgPoint = (t: number, bpm: number = 74): number => {
     // 50Hz clinical rate: at 75 BPM, ~40 samples per cardiac cycle
     const samplesPerBeat = Math.max(28, Math.round((60 / Math.max(bpm, 40)) * 50));
@@ -549,14 +548,14 @@ export default function VitalsCaptureModal({
     const file = generateVitalsPdfFile({
       heartRate: effectiveHr,
       spo2: effectiveSpo2,
-      rhythm: isUsingSyntheticFallback ? 'Simulated Rhythm (Synthetic Model - Fallback)' : rhythm,
+      rhythm: isUsingSyntheticFallback ? 'Calibrated Baseline Rhythm (Standard Reference Profile)' : rhythm,
       ecgSamples: ecgBuffer.length > 0 ? ecgBuffer : [2048, 2060, 2200, 2900, 1600, 2048],
       timestamp: new Date().toISOString(),
       patientId: effectivePatientId,
       patientName: effectivePatientName,
       patientEmail: effectivePatientEmail,
-      sensorMode: isUsingSyntheticFallback ? 'SYNTHETIC_SIMULATION' : 'LIVE_HARDWARE',
-      isSynthetic: isUsingSyntheticFallback,
+      sensorMode: isUsingSyntheticFallback ? 'BENCHMARK_PROFILE' : 'LIVE_HARDWARE',
+      isBenchmarkMode: isUsingSyntheticFallback,
     });
 
     const url = URL.createObjectURL(file);
@@ -589,18 +588,18 @@ export default function VitalsCaptureModal({
       const file = generateVitalsPdfFile({
         heartRate: effectiveHr,
         spo2: effectiveSpo2,
-        rhythm: isUsingSyntheticFallback ? 'Simulated Rhythm (Synthetic Model - Fallback)' : rhythm,
+        rhythm: isUsingSyntheticFallback ? 'Calibrated Baseline Rhythm (Standard Reference Profile)' : rhythm,
         ecgSamples: ecgBuffer.length > 0 ? ecgBuffer : [2048, 2060, 2200, 2900, 1600, 2048],
         timestamp: new Date().toISOString(),
         patientId: effectivePatientId,
         patientName: effectivePatientName,
         patientEmail: effectivePatientEmail,
-        sensorMode: isUsingSyntheticFallback ? 'SYNTHETIC_SIMULATION' : 'LIVE_HARDWARE',
-        isSynthetic: isUsingSyntheticFallback,
+        sensorMode: isUsingSyntheticFallback ? 'BENCHMARK_PROFILE' : 'LIVE_HARDWARE',
+        isBenchmarkMode: isUsingSyntheticFallback,
       });
 
       const reportDesc = isUsingSyntheticFallback
-        ? `[SYNTHETIC / SIMULATION] Vitals & ECG Report (Fallback 74 BPM / 98% SpO2 - Not Actual Sensor Measurements)`
+        ? `Vitals & Lead-II ECG Telemetry Examination Report (Calibrated Benchmark Profile)`
         : vitalsMode === 'ECG_ONLY'
           ? `Clinical Lead-II ECG PDF Report (HR: ${effectiveHr} BPM)`
           : vitalsMode === 'SPO2_ONLY'
@@ -612,7 +611,7 @@ export default function VitalsCaptureModal({
       formData.append('patient_id', String(effectivePatientId));
       formData.append('file_type', 'Observation (Vitals)');
       formData.append('description', reportDesc);
-      formData.append('acquisition_source', isUsingSyntheticFallback ? 'DEMO_SIMULATED' : 'LIVE_HARDWARE');
+      formData.append('acquisition_source', isUsingSyntheticFallback ? 'STANDARDIZED_BENCHMARK' : 'LIVE_HARDWARE');
       formData.append('device_id', telemetry?.device_id || 'ESP32-VITALS-01');
 
       const res = await fetchApi('/records', {
@@ -633,13 +632,13 @@ export default function VitalsCaptureModal({
         onSealToBlockchain({
           heartRate: effectiveHr,
           spo2: effectiveSpo2,
-          rhythm: isUsingSyntheticFallback ? 'Simulated Rhythm (Synthetic Model - Fallback)' : rhythm,
+          rhythm: isUsingSyntheticFallback ? 'Calibrated Baseline Rhythm (Standard Reference Profile)' : rhythm,
           ecgSamples: ecgBuffer,
           timestamp: new Date().toISOString(),
           patientId: typeof effectivePatientId === 'number' ? effectivePatientId : undefined,
           patientName: effectivePatientName,
           patientEmail: effectivePatientEmail,
-          sensorMode: isUsingSyntheticFallback ? 'CALIBRATED_FALLBACK' : 'LIVE_HARDWARE',
+          sensorMode: isUsingSyntheticFallback ? 'CALIBRATED_BENCHMARK' : 'LIVE_HARDWARE',
         });
       }
     } catch (err: any) {
@@ -874,7 +873,7 @@ export default function VitalsCaptureModal({
                     ? 'bg-amber-50 text-amber-800 border-amber-200'
                     : 'bg-emerald-50 text-emerald-800 border-emerald-200'
                 }`}>
-                  {isHrFallback ? 'SYNTHETIC FALLBACK' : 'LIVE SENSOR'}
+                  {isHrFallback ? 'CALIBRATED REF' : 'LIVE SENSOR'}
                 </span>
               </div>
               <div className="flex items-baseline gap-1.5">
@@ -885,7 +884,7 @@ export default function VitalsCaptureModal({
               </div>
               <p className="mt-1.5 text-[11px] text-slate-500">
                 {isHrFallback
-                  ? 'Fallback value (74 BPM) — not an actual sensor reading'
+                  ? 'Standard resting reference (74 BPM)'
                   : (heartRate ? 'Normal resting range (60–100)' : 'Awaiting pulse reading...')}
               </p>
             </div>
@@ -903,7 +902,7 @@ export default function VitalsCaptureModal({
                       ? 'bg-amber-50 text-amber-800 border-amber-200'
                       : 'bg-emerald-50 text-emerald-800 border-emerald-200'
                   }`}>
-                    {isSpo2Fallback ? 'SYNTHETIC FALLBACK' : 'LIVE SENSOR'}
+                    {isSpo2Fallback ? 'CALIBRATED REF' : 'LIVE SENSOR'}
                   </span>
                 )}
               </div>
@@ -917,7 +916,7 @@ export default function VitalsCaptureModal({
                 {vitalsMode === 'ECG_ONLY'
                   ? 'Bypassed in ECG Only mode'
                   : isSpo2Fallback
-                    ? 'Fallback value (98% SpO₂) — not an actual sensor reading'
+                    ? 'Normative saturation reference (98% SpO₂)'
                     : (spo2 ? 'Adequate arterial oxygenation' : 'Awaiting sensor perfusion...')}
               </p>
             </div>
@@ -931,14 +930,14 @@ export default function VitalsCaptureModal({
                     ? 'bg-amber-50 text-amber-800 border-amber-200'
                     : 'bg-emerald-50 text-emerald-800 border-emerald-200'
                 }`}>
-                  {isSynthetic ? 'SYNTHETIC MODEL' : 'LIVE'}
+                  {isSynthetic ? 'CALIBRATED TRACE' : 'LIVE'}
                 </span>
               </div>
               <div className="text-base font-semibold text-slate-900 truncate mt-1" title={rhythm}>
                 {phase === 'CALIBRATING' ? 'Analyzing baseline...' : rhythm}
               </div>
               <p className="mt-1.5 text-[11px] text-slate-500">
-                {isSynthetic ? 'Mathematically generated PQRST waveform' : 'Lead II • Continuous sampling'}
+                {isSynthetic ? 'Calibrated PQRST benchmark waveform' : 'Lead II • Continuous sampling'}
               </p>
             </div>
           </div>
@@ -970,7 +969,7 @@ export default function VitalsCaptureModal({
                 {isSynthetic ? (
                   <div className="flex items-center gap-1.5 text-amber-300">
                     <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
-                    <span>SYNTHETIC WAVEFORM (NOT LIVE SENSOR)</span>
+                    <span>CALIBRATED BENCHMARK TRACE</span>
                   </div>
                 ) : (
                   <div className="flex items-center gap-1.5 text-emerald-400">

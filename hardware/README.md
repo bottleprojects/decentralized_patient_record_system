@@ -1,6 +1,6 @@
 # DPRMS Edge IoT Sensor Firmware (ESP32)
 
-Genuine, cryptographically authenticated physiological telemetry firmware for the **Decentralized Patient Record Management System (DPRMS)**.
+Cryptographically authenticated physiological telemetry firmware for the **Decentralized Patient Record Management System (DPRMS)**.
 
 ---
 
@@ -14,25 +14,26 @@ Genuine, cryptographically authenticated physiological telemetry firmware for th
 | | `SCL` | `GPIO 22` | I2C Clock |
 | **AD8232** (Lead-II ECG) | `3.3V` | `3V3` | 3.3V Power |
 | | `GND` | `GND` | Ground |
-| | `OUTPUT` | `GPIO 34` | 12-bit ADC Input (ADC1_CH6) |
-| | `LO+` | `GPIO 35` | Lead-Off Detection Positive |
-| | `LO-` | `GPIO 32` | Lead-Off Detection Negative |
+| | `OUTPUT` | `GPIO 36` | 12-bit ADC Input (ADC1_CH0) |
+| | `LO+` | `GPIO 34` | Lead-Off Detection Positive |
+| | `LO-` | `GPIO 35` | Lead-Off Detection Negative |
+| | `SDN` | `GPIO 32` | Shutdown Pin (Active High Enable) |
 
 > **IMPORTANT**:
-> `GPIO 34` and `GPIO 35` are input-only pins on the ESP32, which are dedicated to ADC1. This avoids any conflict with Wi-Fi operations (ADC2 channels are disabled during active Wi-Fi transmission).
+> `GPIO 36`, `34`, and `35` connect to ADC1 on the ESP32. This avoids any conflict with Wi-Fi operations (ADC2 channels are disabled during active Wi-Fi transmission).
 
 ---
 
 ## 2. Integrity & Cryptographic Security Architecture
 
-1. **Zero Synthetic Fallbacks**:
-   - The firmware pulls raw digital registers from the MAX30102 via I2C and raw biopotentials from the AD8232 via ADC1.
-   - When no finger is detected or leads are off, values report `0` and flags report `finger_detected: false` / `leads_off: true`. Synthetic constants (e.g. static 74 BPM / 98% SpO₂) are strictly prohibited.
+1. **Strict Transducer Validation**:
+   - The firmware samples raw digital registers from the MAX30102 via I2C and raw biopotentials from the AD8232 via ADC1.
+   - When no finger is detected or leads are off, values report `0` and flags report `finger_detected: false` / `leads_off: true`.
 2. **Edge HMAC-SHA256 Signing**:
-   - Each canonical JSON packet is hashed and signed at the silicon level using hardware cryptographic accelerators (`mbedtls/md.h`).
-   - The generated 256-bit hexadecimal signature is dispatched in the `X-Device-Signature` HTTP header.
-3. **Session Binding**:
-   - Telemetry packets are bound to the active `session_uuid`, negotiated during clinical acquisition initiation.
+   - Each canonical packet is hashed and signed at the silicon level using hardware cryptographic accelerators (`mbedtls/md.h`).
+   - The generated 256-bit hexadecimal signature is included in the payload `auth_tag`.
+3. **Session Binding & Freshness**:
+   - Telemetry packets are bound to the active `session_id`, synchronized via NTP UTC time, and verified against a 10-second sliding-window freshness tolerance.
 
 ---
 

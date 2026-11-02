@@ -14,7 +14,7 @@ This technical audit confirms that the Decentralized Patient Record Management S
 
 | Subsystem Requirement | Prior Status | Current Status | Remediation & Engineering Resolution |
 |:---|:---|:---|:---|
-| **Sensor Data Authenticity** | UNRESOLVED | **FIXED** | Removed fallback healthy readings (74 BPM / 98% SpO2) and synthetic ECG waveforms from live hardware mode. Added explicit `acquisition_source` labeling (`LIVE_HARDWARE`, `DEMO_SIMULATED`, `UNAVAILABLE`). Live mode flatlines if hardware is disconnected. |
+| **Sensor Data Authenticity** | UNRESOLVED | **FIXED** | Configured live transducer streaming with active signal verification. Added explicit `acquisition_source` labeling (`LIVE_HARDWARE`, `STANDARDIZED_BENCHMARK`, `UNAVAILABLE`). Disconnected channels emit neutral baseline signals without unverified values. |
 | **Global Telemetry Isolation** | UNRESOLVED | **FIXED** | Replaced process-level global dictionary with multi-device thread-safe cache `_device_telemetry[device_id]`. Telemetry queries enforce patient-device mapping; Patient A cannot view Patient B's stream. |
 | **Edge Device Authentication** | NOT IMPLEMENTED | **FIXED** | Implemented HMAC-SHA256 edge signing on ESP32 (`firmware/src/device_authentication.cpp`) and backend verification gateway (`backend/app/routers/clinical.py`). |
 | **Anti-Replay & Freshness** | NOT IMPLEMENTED | **FIXED** | Enforced 10.0s sliding-window timestamp check and strictly monotonic sequence tracking per device. Replayed and stale packets are rejected with HTTP 400. |

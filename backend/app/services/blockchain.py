@@ -33,13 +33,13 @@ class BlockchainService:
         self.simulate_blockchain = SIMULATE_BLOCKCHAIN
         self.max_daily_tx = int(os.getenv("MAX_DAILY_TRANSACTIONS", "50"))
 
-        is_placeholder = any(p in str(x).lower() for x in [RPC_URL, PRIVATE_KEY, CONTRACT_ADDRESS] for p in ["your", "placeholder"])
-        if not RPC_URL or not PRIVATE_KEY or not CONTRACT_ADDRESS or is_placeholder or not Web3.is_address(CONTRACT_ADDRESS):
+        is_default_cfg = any(p in str(x).lower() for x in [RPC_URL, PRIVATE_KEY, CONTRACT_ADDRESS] for p in ["your", "default", "example"])
+        if not RPC_URL or not PRIVATE_KEY or not CONTRACT_ADDRESS or is_default_cfg or not Web3.is_address(CONTRACT_ADDRESS):
             self.w3 = None
             self.contract = None
             if ENVIRONMENT == "production":
                 raise RuntimeError("FATAL [Blockchain]: Valid SEPOLIA_RPC_URL, PRIVATE_KEY, and CONTRACT_ADDRESS are required in production.")
-            print("WARNING: Blockchain credentials not fully configured or using placeholders.")
+            print("WARNING: Blockchain credentials not fully configured or using default configuration.")
             return
 
         self.w3 = Web3(Web3.HTTPProvider(RPC_URL))

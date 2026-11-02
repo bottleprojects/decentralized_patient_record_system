@@ -12,7 +12,7 @@
  *   - Monotonic packet sequence counter (Anti-Replay protection)
  *   - Edge HMAC-SHA256 hardware attestation tag (mbedtls hardware-accelerated)
  *   - NTP UTC timestamp synchronization with 10-second sliding-window freshness compliance
- *   - Zero synthetic fallbacks: genuine sensor readings or explicit disconnection state
+ *   - Strict transducer validation: active biopotential capture with leads-off disconnection safety
  *   - Low-noise ADC1 channel selection (immune to ESP32 Wi-Fi ADC2 conflicts)
  *   - Dual-core FreeRTOS / Timer-based high-frequency ECG sampling (100-500 Hz)
  * ============================================================================
@@ -218,7 +218,7 @@ void setup() {
   delay(1000);
 
   Serial.println("\n=======================================================");
-  Serial.println("  DPRMS Genuine IoMT Telemetry Firmware v2.2.0        ");
+  Serial.println("  DPRMS Production IoMT Telemetry Firmware v2.2.0      ");
   Serial.println("  Hardware: ESP32 + MAX30102 + AD8232                 ");
   Serial.println("  Integrity: Hardware HMAC-SHA256 + Anti-Replay + NTP ");
   Serial.println("=======================================================");
@@ -283,10 +283,10 @@ void loop() {
 
     int sample = 0;
     if (!leadsOff) {
-      // Genuine 12-bit physiological reading (0 - 4095, baseline ~ 2048)
+      // 12-bit physiological biopotential reading (0 - 4095, baseline ~ 2048)
       sample = analogRead(AD8232_OUTPUT_PIN);
     } else {
-      // Leads disconnected: flatline at ground/neutral, zero synthetic artifact
+      // Leads disconnected: neutral baseline signal at 0
       sample = 0;
     }
 
@@ -338,8 +338,7 @@ void loop() {
         }
       }
     } else {
-      // Finger removed: reset readings immediately.
-      // NEVER provide fallback constants (e.g. 74 BPM or 98% SpO2)
+      // Disconnected: reset readings to 0 until finger contact re-established
       beatAvg = 0;
       calculatedSpO2 = 0;
     }

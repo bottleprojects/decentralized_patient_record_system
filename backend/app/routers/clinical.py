@@ -288,10 +288,12 @@ def ingest_telemetry(data: TelemetryIngest, db: Session = Depends(get_db)):
             "acquisition_source": data.acquisition_source or "LIVE_HARDWARE",
         }
 
-    # Update device last_seen_at
+    # Optimized heartbeat persistence (throttled to 10s intervals to eliminate DB commit churn)
     if device:
-        device.last_seen_at = datetime.utcnow()
-        db.commit()
+        now_dt = datetime.utcnow()
+        if not device.last_seen_at or (now_dt - device.last_seen_at).total_seconds() >= 10.0:
+            device.last_seen_at = now_dt
+            db.commit()
 
     return {"status": "ok", "mode": current_mode, "device_id": device_id}
 

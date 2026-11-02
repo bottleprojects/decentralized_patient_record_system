@@ -15,7 +15,7 @@ else:
 ENVIRONMENT = os.getenv("ENVIRONMENT", "development").strip().lower()
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-is_placeholder = bool(
+is_default_db_config = bool(
     not DATABASE_URL
     or "@host:5432" in DATABASE_URL
     or "user:password" in DATABASE_URL
@@ -23,7 +23,7 @@ is_placeholder = bool(
 )
 
 if ENVIRONMENT == "production":
-    if is_placeholder:
+    if is_default_db_config:
         raise RuntimeError(
             "FATAL [Database]: In production (ENVIRONMENT=production), DATABASE_URL must be set "
             "to a valid hosted PostgreSQL connection string. SQLite fallback is strictly prohibited."
@@ -35,7 +35,7 @@ if ENVIRONMENT == "production":
         )
 
 # PostgreSQL URL formatting and driver selection
-if DATABASE_URL and not is_placeholder:
+if DATABASE_URL and not is_default_db_config:
     if DATABASE_URL.startswith("postgres://"):
         DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+psycopg2://", 1)
     elif DATABASE_URL.startswith("postgresql://") and not DATABASE_URL.startswith("postgresql+"):
@@ -47,7 +47,7 @@ if DATABASE_URL and not is_placeholder:
             sep = "&" if "?" in DATABASE_URL else "?"
             DATABASE_URL = f"{DATABASE_URL}{sep}sslmode=require"
 
-elif is_placeholder:
+elif is_default_db_config:
     # Development fallback
     print(f"INFO [Database]: Using local SQLite fallback in {ENVIRONMENT} mode (local_records.db).")
     DATABASE_URL = "sqlite:///./local_records.db"

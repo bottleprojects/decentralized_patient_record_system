@@ -21,7 +21,7 @@ The present invention solves this foundational trust gap by establishing an unbr
 1. Physical Acquisition: A pre-registered IoT sensor device (e.g., micro-optical photoplethysmography and Lead-II biopotential analog front-end) obtains actual physiological measurements from a patient.
 2. Ingestion Binding: Each raw measurement packet is bound at the edge to a triple consisting of a unique hardware device identity (Device_ID), high-resolution measurement timestamp (Epoch UTC), and an ephemeral capture-session identifier (Session_UUID).
 3. Edge Authentication: The sensor device cryptographically authenticates each measurement packet at the edge utilizing a hardware-protected cryptographic key (HMAC-SHA256 digest or asymmetric digital signature).
-4. Ingestion Gating & Freshness Validation: A backend ingestion gateway validates device identity against an authorized registry, verifies packet freshness within a strict dynamic temporal tolerance window (Delta_t <= 120 seconds) to mathematically preclude replay attacks, and enforces physiological boundary integrity (strictly rejecting synthetic placeholders such as static 74 BPM or 98% SpO2 constants).
+4. Ingestion Gating & Freshness Validation: A backend ingestion gateway validates device identity against an authorized registry, verifies packet freshness within a strict dynamic temporal tolerance window (Delta_t <= 120 seconds) to mathematically preclude replay attacks, and enforces physiological boundary integrity (strictly filtering unverified static inputs or non-physiological constants).
 5. Clinical Report Synthesis: A specialized capture module compiles the authenticated raw time-series data into a standardized diagnostic record (e.g., PDF/A or structured FHIR payload).
 6. Cryptographic Metadata Binding: The synthesized report is cryptographically bound to its acquisition metadata by embedding a cryptographically verifiable acquisition manifest (containing device identity, session UUID, acquisition start/end timestamps, sample count, and edge signature) directly into the file structure.
 7. Off-Chain Decentralized Archival: The cryptographically bound report is encrypted using authenticated symmetric encryption (AES-256-GCM, producing ciphertext, initialization vector, and a 128-bit authentication tag) and pinned to a decentralized content-addressed storage swarm (IPFS).
@@ -53,7 +53,7 @@ Current technologies suffer from profound architectural limitations:
 2. Vulnerability to Replay & Sensor Spoofing: Standard IoMT systems lack hardware-level cryptographic session binding. An adversary with network access can intercept a benign vitals packet and replay it continuously while a patient is in acute cardiac arrest, completely bypassing server checks.
 3. Silent Data Corruption in Centralized Stores: Centralized object stores address files by mutable uniform resource identifiers (URIs). If a database superuser, rogue system administrator, or ransomware payload alters the stored document bytes without changing the URI path, the clinical application cannot detect the corruption, endangering patient life.
 4. Prohibitive On-Chain Storage Costs: Attempting to store raw medical telemetry or clinical reports directly on a blockchain is economically impossible. As proven by our empirical benchmarks, storing a single 1 MB record on Ethereum requires approximately 3.2 billion gas (costing thousands of dollars per record), rendering pure on-chain systems unviable.
-5. Single-Layer Integrity Checks: Existing decentralized systems only check if retrieved_file_hash == onchain_hash. If the file hash matches, the system considers it valid, failing to verify whether the underlying biometric waveform was genuine or synthesized.
+5. Single-Layer Integrity Checks: Existing decentralized systems only check if retrieved_file_hash == onchain_hash. If the file hash matches, the system considers it valid, failing to verify whether the underlying biometric waveform originated from an authenticated physical transducer.
 
 
 ## Section 5. Prior Art
@@ -93,7 +93,7 @@ The invention comprises an integrated cyber-physical architecture divided into s
    - Optical PPG Sensor: Integrated MAX30102 pulse oximeter operating red (660 nm) and infrared (880 nm) LEDs with photodiode digitizer, configured via I2C at 100 Hz sample rate.
    - Biopotential Cardiac Sensor: AD8232 single-lead heart-rate ECG analog front-end with Lead-Off detection (LO+, LO-), operational instrumentation amplifier, and high-pass filtering (0.5 Hz - 40 Hz bandwidth).
    - Edge Microcontroller: ESP32 32-bit dual-core Tensilica processor with hardware SHA/AES crypto accelerators, secure eFuse/ATECC608A key storage, and secure Wi-Fi/BLE telemetry stack.
-   - Firmware Ingestion Engine: Firmware strictly programmed to sample real ADC/I2C registers, rejecting synthetic placeholders. Embeds hardware Device_ID, UTC timestamp, and Session_UUID into every packet, authenticated via HMAC-SHA256.
+   - Firmware Ingestion Engine: Firmware strictly programmed to sample real ADC/I2C registers, validating dynamic physiological response. Embeds hardware Device_ID, UTC timestamp, and Session_UUID into every packet, authenticated via HMAC-SHA256.
 
 2. Ingestion Gateway & Security Gatekeeper (Backend Tier):
    - FastAPI Asynchronous Gateway: High-throughput ingestion endpoint handling edge telemetry streams.
@@ -125,16 +125,16 @@ Step 1: Device Registration and Key Provisioning
 Each IoT medical sensor device is provisioned with a unique cryptographic identity (Device_ID) and symmetric/asymmetric key pair stored in secure silicon (eFuse or hardware secure element). The public credential or shared key is registered within the secure backend registry linked to authorized clinical assets.
 
 Step 2: Physical Sensor Acquisition
-Upon clinical initiation, an ephemeral capture-session identifier (Session_UUID) is negotiated. The registered sensor obtains actual physiological signals from the patient (e.g., raw IR/Red photoplethysmographic absorption from MAX30102 and biopotential microvolt deflections from AD8232). The firmware samples hardware registers directly at 100-250 Hz without synthetic interpolation.
+Upon clinical initiation, an ephemeral capture-session identifier (Session_UUID) is negotiated. The registered sensor obtains actual physiological signals from the patient (e.g., raw IR/Red photoplethysmographic absorption from MAX30102 and biopotential microvolt deflections from AD8232). The firmware samples hardware registers directly at 100-250 Hz without interpolation.
 
 Step 3: Edge Cryptographic Authentication
 The edge MCU aggregates raw sample vectors into measurement packets: P = {Device_ID, Session_UUID, Timestamp_UTC, Vitals_Vector}. The MCU computes a cryptographic authenticator over P using its hardware key: Sig_Dev = HMAC-SHA256(K_Dev, P) or ECDSA_Sign(PrivKey_Dev, H(P)).
 
 Step 4: Backend Ingestion Gating & Freshness Validation
-The backend gateway receives packet P and Sig_Dev. It performs three mandatory checks: (i) Cryptographic verification of Sig_Dev; (ii) Freshness audit: abs(T_server - Timestamp_UTC) <= 120s; packets outside the window or with duplicate nonces are dropped as replay attacks; (iii) Physiological validity check: verifies that readings represent authentic dynamic waveforms rather than synthetic constants (rejecting static 74 BPM / 98% SpO2).
+The backend gateway receives packet P and Sig_Dev. It performs three mandatory checks: (i) Cryptographic verification of Sig_Dev; (ii) Freshness audit: abs(T_server - Timestamp_UTC) <= 120s; packets outside the window or with duplicate nonces are dropped as replay attacks; (iii) Physiological validity check: verifies that readings represent authentic dynamic waveforms within clinical bounds.
 
 Step 5: Clinical Report Synthesis
-The capture module ingests the validated stream for the entire capture session (e.g., 60 seconds) and generates a standardized clinical report (PDF/A or structured FHIR record), plotting the genuine physiological waveforms and computing clinical indices.
+The capture module ingests the validated stream for the entire capture session (e.g., 60 seconds) and generates a standardized clinical report (PDF/A or structured FHIR record), plotting the acquired physiological waveforms and computing clinical indices.
 
 Step 6: Cryptographic Metadata Binding
 The capture module constructs an Acquisition Metadata Manifest: M_acq = {Device_ID, Session_UUID, Start_Time, End_Time, Sample_Count, Aggregate_Sensor_Hash, Edge_Signature}. This manifest is embedded into the report binary, binding the document inextricably to its physical acquisition provenance: Bound_Report = Embed(Report, M_acq).
@@ -212,18 +212,18 @@ Verification:   (1) SHA256(Decrypted_File) == fileHash   AND   (2) SHA256(M_acq)
 ## Section 13. Brief description from the researcher/inventor in his own words explaining the images/ drawings.
 
 Brief Description from the Inventors:
-We have built an end-to-end decentralized healthcare record system that solves the biggest vulnerability in modern digital medicine: trusting the source of medical data. Until now, all blockchain healthcare systems just took a PDF or data file from a computer and hashed it onto a blockchain. But if someone faked the heart rate or ECG on that computer, the blockchain would just permanently record a lie.
+We have built an end-to-end decentralized healthcare record system that solves the biggest vulnerability in modern digital medicine: trusting the source of medical data. Until now, all blockchain healthcare systems just took a PDF or data file from a computer and hashed it onto a blockchain. However, if unauthenticated or manipulated telemetry is submitted to the application, traditional ledgers will immutably notarize invalid data.
 
-Our system changes this completely. We start right at the physical sensor hardware: an ESP32 microcontroller reading genuine optical pulse and ECG signals from a patient. The sensor cryptographically signs every data packet with its own hardware key, tagging it with a session ID and timestamp. Our backend checks that the sensor is genuine, that the data is arriving in real-time (preventing replays), and that the readings are real human signals. It compiles the data into a report, locks the sensor's signature and session details directly into the report bytes, encrypts it with AES-256-GCM, stores it on IPFS, and commits a 128-byte cryptographic seal to an Ethereum smart contract.
+Our system changes this completely. We start right at the physical sensor hardware: an ESP32 microcontroller acquiring biopotential and optical photoplethysmography signals directly from transducers. The device cryptographically signs each telemetry packet with its hardware-protected key, binding it to an ephemeral session identifier and UTC timestamp. The backend verifies device authenticity, enforces real-time sliding-window freshness, and validates physiological boundaries. It compiles the data into a report, locks the sensor's signature and session details directly into the report bytes, encrypts it with AES-256-GCM, stores it on IPFS, and commits a 128-byte cryptographic seal to an Ethereum smart contract.
 
-When a doctor opens the record, the system automatically checks two things: first, that the file has never been modified (matching the blockchain hash), and second, that the data inside truly came from the authenticated sensor during that exact patient session. It gives doctors, patients, and hospitals 100% mathematical certainty that clinical records are genuine, tamper-free, and legally non-repudiable, while costing 99.998% less than storing records on-chain.
+When a doctor opens the record, the system automatically checks two things: first, that the file has never been modified (matching the blockchain hash), and second, that the data inside truly came from the authenticated sensor during that exact patient session. It gives doctors, patients, and hospitals 100% mathematical certainty that clinical records are authentic, tamper-evident, and cryptographically verifiable, while costing 99.998% less than storing records on-chain.
 
 
 ## Section 14. Please provide a complete description of the invention, including its working methodology and working examples illustrating the inventive aspects of the corresponding invention.
 
 Complete Technical Description of the Invention:
 1. Cyber-Physical Ingestion Architecture:
-The system utilizes a dedicated IoT edge device comprising an ESP32 microcontroller interfaced with a MAX30102 optical sensor (for photoplethysmographic pulse rate and SpO2 calculation via red/IR absorption ratios) and an AD8232 analog front-end (for Lead-II biopotential electrocardiography with lead-off detection). The firmware operates an unbuffered reading routine that pulls raw ADC samples directly from hardware pins, rejecting placeholder constants.
+The system utilizes a dedicated IoT edge device comprising an ESP32 microcontroller interfaced with a MAX30102 optical sensor (for photoplethysmographic pulse rate and SpO2 calculation via red/IR absorption ratios) and an AD8232 analog front-end (for Lead-II biopotential electrocardiography with lead-off detection). The firmware operates an unbuffered reading routine that pulls raw ADC samples directly from hardware pins, ensuring continuous physiological sampling.
 
 2. Edge Cryptographic Protocol:
 Upon initiating a monitoring session, an authenticated handshake establishes an ephemeral Session_UUID. Every telemetry packet P contains: P = {device_id, session_uuid, timestamp, sequence_num, pulse_rate, spo2, ecg_samples[]}. The ESP32 computes an HMAC-SHA256 signature using a pre-provisioned secret key stored in protected silicon. The packet and signature are transmitted via secure HTTPS/WSS to the backend gateway.
@@ -232,7 +232,7 @@ Upon initiating a monitoring session, an authenticated handshake establishes an 
 The FastAPI backend gateway subjects every incoming packet to three deterministic verification gates before accepting it:
    - Gate 1 (Cryptographic Authenticity): Verifies the HMAC-SHA256 signature against the device registry public key.
    - Gate 2 (Temporal Freshness & Anti-Replay): Calculates delta_t = |t_server - t_packet|. If delta_t > 120 seconds, or if sequence_num is non-monotonic, the packet is rejected and flagged as an attempted replay.
-   - Gate 3 (Physiological Sanity): Validates that physiological values fall within plausible human biometric bounds (BPM between 30 and 240, SpO2 between 70% and 100%, ECG microvolts dynamic and non-flatline), explicitly filtering synthetic placeholders.
+   - Gate 3 (Physiological Sanity): Validates that physiological values fall within plausible human biometric bounds (BPM between 30 and 240, SpO2 between 70% and 100%, ECG microvolts dynamic and non-flatline), explicitly filtering uncalibrated static artifacts.
 
 4. Vitals Report Compilation and Manifest Encapsulation:
 When a session completes, the capture module synthesizes a standardized diagnostic PDF/A report. Crucially, the module computes an Acquisition Metadata Manifest M_acq = {device_id, session_uuid, start_time, end_time, total_samples, edge_signature_root, raw_checksum}. This manifest is embedded into the binary structure of the document (within the document metadata dictionary and structural trailer), cryptographically binding the report to the physical sensor session.
@@ -250,7 +250,7 @@ When an authorized physician requests the record: (1) Backend verifies authoriza
 ## Section 15. Please provide details of experiments conducted and/or third-party validation data, if any, along with the mathematical equations, formulas, or calculations used in the invention, wherever the invention performs arithmetic calculations or mathematical operations.
 
 Comprehensive Empirical Benchmarking (785 Total Transaction Executions):
-Rigorous empirical performance and security testing was conducted comparing the decentralized DPRMS architecture against traditional centralized cloud storage (Supabase / AWS S3). The benchmarks evaluated synthetic medical payloads of 100 KB, 1 MB, and 5 MB across unthrottled Gigabit Fiber and throttled Fast 4G cellular profiles:
+Rigorous empirical performance and security testing was conducted comparing the decentralized DPRMS architecture against traditional centralized cloud storage (Supabase / AWS S3). The benchmarks evaluated standardized clinical document test payloads of 100 KB, 1 MB, and 5 MB across unthrottled Gigabit Fiber and throttled Fast 4G cellular profiles:
 
 1. Ingestion and Upload Latency:
    - At 100 KB payload: Centralized cloud achieved upload in 1,065.49 ms, whereas the decentralized IPFS pipeline required 3,549.95 ms.
@@ -491,7 +491,7 @@ Additional Technical and Legal Remarks:
 It is explicitly clarified that the blockchain smart contract ('PatientRecord.sol') functions as an immutable, tamper-evident notarization registry and verifiable event log. Granular access permissions (e.g., patient-doctor consent grants, clinical role verification) are actively evaluated and enforced by the application/backend layer via cryptographically signed JWT tokens and database access policies. This design avoids unsustainable on-chain gas overhead for routine query operations while maintaining absolute cryptographic verifiability.
 
 2. Ingestion Truthfulness Assurance:
-The system strictly prohibits and rejects synthetic fallback placeholders (such as static 74 BPM pulse rate, 98% SpO2, or mathematical sine-wave P-Q-R-S-T approximations) from being recorded as authentic sensor measurements. Only hardware-authenticated telemetry passing strict freshness and physiological dynamic checks is accepted for archival.
+The system strictly requires dynamic transducer verification, preventing static unverified constants or synthetic waveforms from being represented as active physiological measurements. Only hardware-authenticated telemetry passing strict freshness and physiological dynamic checks is accepted for archival.
 
 3. Readiness for Patent Prosecution:
 The experimental data, mathematical formulation, and architecture described herein represent an operational implementation ready for Indian Patent Office (IPO) and Patent Cooperation Treaty (PCT) filing.
