@@ -18,6 +18,7 @@ test.json
 .DS_Store
 # Documentation & Local Drafts
 docs/
+DPRMS_Patent_Diagrams/
 # Firmware & Hardware
 # firmware/ (tracked for complete hardware implementation)
 *.ino
